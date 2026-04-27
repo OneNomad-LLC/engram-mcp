@@ -4,6 +4,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { Storage } from './storage.js';
+import type { MemoryType, Sentiment } from './types.js';
+import {
+  buildUpdateMetadataPatch,
+  type UpdateMetadataInput,
+  type UpdateMetadataMode,
+} from './update-metadata.js';
 import { loadConfig } from './config.js';
 import { isLlmAvailable } from './llm.js';
 import { search, selectRelevant, formatRecalledMemories } from './search.js';
@@ -207,6 +213,97 @@ server.registerTool(
         domain: chunks[0].domain || undefined,
         topic: chunks[0].topic || undefined,
       } : null,
+    });
+  }
+);
+
+// memory_update_metadata — patch metadata-shape fields on an existing
+// memory by id. Closes a gap that callers (e.g. cortex's workspace
+// backfill) hit when they need to correct stamps without re-ingesting
+// (which either dupes or relies on similarity dedupe to overwrite —
+// neither is correct semantics).
+//
+// The "metadata" surface here is engram-native: top-level
+// MemoryChunk fields (tags, source, domain, topic, type, sentiment,
+// importance, cognitiveLayer). Cortex translates its richer
+// metadata.X shape into this surface client-side. Per the north-
+// star: engram changes are generic non-breaking additives, not
+// caller-specific hooks.
+//
+// Mutations of `id`, `createdAt`, and the embedding-related fields
+// (`embedding`, `embeddingVersion`) are rejected — those are either
+// immutable identity or computed from content. Callers wanting to
+// re-embed should re-ingest with skipDedupe.
+
+server.registerTool(
+  'memory_update_metadata',
+  {
+    title: 'Update Memory Metadata',
+    description: 'Patch metadata-shape fields on an existing memory by id. Use to correct mis-stamped tags/source/domain/topic without re-ingesting (which would either duplicate or rely on similarity dedupe to overwrite). Mode "merge" (default) only updates specified fields; "replace" wipes unset fields to defaults — footgun-y, used sparingly. Rejects mutations of id, createdAt, embedding (re-embedding requires re-ingest with skipDedupe).',
+    inputSchema: z.object({
+      id: z.string().describe('Memory id to patch.'),
+      metadata: z.object({
+        tags: z.array(z.string()).optional().describe('Replacement tags array. To add/remove individual tags, callers fetch first, modify, write back.'),
+        source: z.string().optional(),
+        domain: z.string().optional(),
+        topic: z.string().optional(),
+        type: z.enum(['fact', 'preference', 'decision', 'context', 'correction']).optional(),
+        sentiment: z.enum(['frustrated', 'curious', 'satisfied', 'neutral', 'excited', 'confused']).optional(),
+        importance: z.number().min(0).max(1).optional(),
+        cognitiveLayer: z.string().optional(),
+      }).describe('Partial metadata to apply.'),
+      mode: z.enum(['merge', 'replace']).optional().describe('Default merge — patch only specified keys. Replace — clear unspecified metadata fields to defaults.'),
+    }),
+  },
+  async ({ id, metadata, mode }) => {
+    const storage = await ensureStorage();
+    const existing = await storage.getChunk(id);
+    if (!existing) {
+      return json({ error: 'not_found', id });
+    }
+
+    const effectiveMode: UpdateMetadataMode = mode ?? 'merge';
+
+    // Build the patch. In merge mode, only carry fields the caller set.
+    // In replace mode, fields the caller didn't set get reset to engram
+    // defaults (matches what fresh ingest would produce). Either way,
+    // immutable fields (id, createdAt, embedding) stay locked.
+    const patch = buildUpdateMetadataPatch(metadata as UpdateMetadataInput, effectiveMode);
+    if (effectiveMode === 'replace') {
+      process.stderr.write(`[engram] memory_update_metadata mode=replace id=${id} — caller wiped unset metadata fields to defaults\n`);
+    }
+
+    // Compute a lightweight diff for the audit line (existing vs patch),
+    // limited to the keys the patch actually touches so we don't log the
+    // whole memory blob.
+    const diff: Record<string, { from: unknown; to: unknown }> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      const before = (existing as unknown as Record<string, unknown>)[key];
+      diff[key] = { from: before, to: value };
+    }
+    process.stderr.write(
+      `[engram] memory_update_metadata id=${id} mode=${effectiveMode} diff=${JSON.stringify(diff)}\n`,
+    );
+
+    await storage.updateChunk(id, patch);
+
+    const updated = await storage.getChunk(id);
+    if (!updated) {
+      // Shouldn't happen — getChunk just returned for the same id.
+      return json({ error: 'updated_not_found', id });
+    }
+    return json({
+      updated: {
+        id: updated.id,
+        content: updated.content,
+        type: updated.type,
+        tags: updated.tags,
+        source: updated.source,
+        domain: updated.domain,
+        topic: updated.topic,
+        sentiment: updated.sentiment,
+        importance: updated.importance,
+      },
     });
   }
 );

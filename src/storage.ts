@@ -229,6 +229,12 @@ export class Storage {
     if (updates.embedding !== undefined) values.embedding = updates.embedding ?? new Array(384).fill(0);
     if (updates.domain !== undefined) values.domain = updates.domain;
     if (updates.topic !== undefined) values.topic = updates.topic;
+    // metadata-shaped fields needed by memory_update_metadata
+    if (updates.tags !== undefined) values.tags = JSON.stringify(updates.tags);
+    if (updates.source !== undefined) values.source = updates.source;
+    if (updates.type !== undefined) values.type = updates.type;
+    if (updates.sentiment !== undefined) values.sentiment = updates.sentiment;
+    if (updates.cognitiveLayer !== undefined) values.cognitive_layer = updates.cognitiveLayer;
     // v2 fields
     if (updates.stability !== undefined) values.stability = updates.stability;
     if (updates.difficulty !== undefined) values.difficulty = updates.difficulty;
