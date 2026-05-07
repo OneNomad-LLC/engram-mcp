@@ -84,6 +84,7 @@ export async function consolidateEpisodic(
       consolidationLevel: 1,
       sourceChunkIds: cluster.map(c => c.id),
       embeddingVersion: 1,
+      origin: 'derived',
     };
 
     // Embed the summary

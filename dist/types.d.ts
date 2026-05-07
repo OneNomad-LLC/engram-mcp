@@ -1,7 +1,8 @@
-export type MemoryTier = 'daily' | 'short-term' | 'long-term' | 'archive';
+export type MemoryTier = 'scratch' | 'daily' | 'short-term' | 'long-term' | 'archive';
 export type MemoryType = 'fact' | 'preference' | 'decision' | 'context' | 'correction';
 export type CognitiveLayer = 'episodic' | 'semantic' | 'procedural';
 export type Sentiment = 'frustrated' | 'curious' | 'satisfied' | 'neutral' | 'excited' | 'confused';
+export type MemoryOrigin = 'user' | 'derived' | 'extracted' | 'imported';
 export interface MemoryChunk {
     id: string;
     tier: MemoryTier;
@@ -25,6 +26,7 @@ export interface MemoryChunk {
     sourceChunkIds?: string[];
     embeddingVersion?: number;
     parentChunkId?: string;
+    origin?: MemoryOrigin;
 }
 export interface MemoryEdge {
     targetId: string;

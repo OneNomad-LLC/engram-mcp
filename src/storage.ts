@@ -43,6 +43,12 @@ export class Storage {
     // ── Chunks table ─────────────────────────────────────────────
     if (tableNames.includes('chunks')) {
       this.chunks = await this.db.openTable('chunks');
+      // Migration: add origin column to pre-existing tables.
+      // addColumns throws if the column already exists, which is the success
+      // path on second boot — swallow it.
+      try {
+        await this.chunks.addColumns([{ name: 'origin', valueSql: "'derived'" }]);
+      } catch { /* column already present */ }
     } else {
       this.chunks = await this.db.createTable('chunks', [{
         id: '__init__',
@@ -69,6 +75,7 @@ export class Storage {
         source_chunk_ids: '[]',
         embedding_version: 1,
         parent_chunk_id: '',
+        origin: 'derived',
       }]);
       await this.chunks.delete('id = \'__init__\'');
     }
@@ -159,6 +166,7 @@ export class Storage {
       source_chunk_ids: JSON.stringify(chunk.sourceChunkIds ?? []),
       embedding_version: chunk.embeddingVersion ?? 1,
       parent_chunk_id: chunk.parentChunkId ?? '',
+      origin: chunk.origin ?? 'derived',
     }]);
   }
 
@@ -243,6 +251,7 @@ export class Storage {
     if (updates.sourceChunkIds !== undefined) values.source_chunk_ids = JSON.stringify(updates.sourceChunkIds);
     if (updates.embeddingVersion !== undefined) values.embedding_version = updates.embeddingVersion;
     if (updates.parentChunkId !== undefined) values.parent_chunk_id = updates.parentChunkId;
+    if (updates.origin !== undefined) values.origin = updates.origin;
 
     if (Object.keys(values).length === 0) return;
     await this.chunks.update({ where: `id = '${esc(id)}'`, values });
@@ -480,6 +489,7 @@ function rowToChunk(row: any): StoredChunk {
     sourceChunkIds: row.source_chunk_ids ? JSON.parse(row.source_chunk_ids) : undefined,
     embeddingVersion: row.embedding_version ?? 1,
     parentChunkId: row.parent_chunk_id || undefined,
+    origin: row.origin || 'derived',
   };
 }
 

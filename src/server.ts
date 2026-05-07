@@ -168,9 +168,11 @@ server.registerTool(
       emotionalValence: z.number().min(-1).max(1).optional().describe('Emotional valence from Persona. Boosts importance for charged memories.'),
       emotionalArousal: z.number().min(0).max(1).optional().describe('Emotional arousal from Persona. High arousal = stronger encoding.'),
       skipDedupe: z.boolean().optional().describe('If true, bypass the 0.75-similarity duplicate check. Use when the caller is writing structured refinements of prior memories (e.g. action items derived from a meeting note) and dedupe would swallow the write.'),
+      origin: z.enum(['user', 'derived', 'extracted', 'imported']).optional().describe('Provenance. Default "user" — explicit ingest is treated as user-asserted and protected from auto-merge / archive. Set "derived" when the caller is a downstream pipeline writing inferences.'),
+      tier: z.enum(['scratch', 'short-term']).optional().describe('Memory tier. "scratch" = session-only, never promoted by consolidation, auto-purged after 24h. Use for exploratory notes you may want to discard. Default short-term.'),
     }),
   },
-  async ({ content, type, importance, tags, source, domain, topic, sentiment, emotionalValence, emotionalArousal, skipDedupe }) => {
+  async ({ content, type, importance, tags, source, domain, topic, sentiment, emotionalValence, emotionalArousal, skipDedupe, origin, tier }) => {
     const storage = await ensureStorage();
 
     // Auto duplicate check (replaces old memory_check_duplicate tool). Callers
@@ -202,6 +204,8 @@ server.registerTool(
       sentiment: sentiment as any,
       emotionalValence,
       emotionalArousal,
+      origin: origin ?? 'user',
+      tier,
     }]);
     return json({
       ingested: chunks.length,
@@ -305,6 +309,27 @@ server.registerTool(
         importance: updated.importance,
       },
     });
+  }
+);
+
+server.registerTool(
+  'memory_scratch_promote',
+  {
+    title: 'Promote Scratch Memory',
+    description: 'Graduate a scratch-tier memory to short-term so it survives the 24h auto-purge and enters the normal consolidation lifecycle. Use after deciding an exploratory note is worth keeping.',
+    inputSchema: z.object({
+      id: z.string().describe('Scratch chunk id to promote.'),
+    }),
+  },
+  async ({ id }) => {
+    const storage = await ensureStorage();
+    const existing = await storage.getChunk(id);
+    if (!existing) return json({ error: 'not_found', id });
+    if (existing.tier !== 'scratch') {
+      return json({ error: 'not_scratch', id, currentTier: existing.tier });
+    }
+    await storage.updateChunk(id, { tier: 'short-term' });
+    return json({ promoted: true, id, from: 'scratch', to: 'short-term' });
   }
 );
 

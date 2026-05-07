@@ -79,6 +79,7 @@ export async function mem0Extract(
       recallCount: 0,
       relatedMemories: [],
       recallOutcomes: [],
+      origin: 'extracted',
     };
 
     await storage.saveChunk(chunk);
@@ -163,6 +164,7 @@ export async function mem0SyncAll(
       recallCount: 0,
       relatedMemories: [],
       recallOutcomes: [],
+      origin: 'extracted',
     };
 
     await storage.saveChunk(chunk);

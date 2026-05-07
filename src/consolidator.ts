@@ -16,7 +16,10 @@ export interface ConsolidationStats {
   episodicClustered: number;
   episodicSummarized: number;
   selfOrganized: number;
+  scratchPurged: number;
 }
+
+const SCRATCH_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Background consolidation pass: links, decays, promotes, demotes, and merges memories.
@@ -28,10 +31,16 @@ export async function consolidate(storage: Storage, config?: SmartMemoryConfig):
     linked: 0, decayed: 0, promoted: 0, demoted: 0,
     reactivated: 0, dailyMoved: 0, merged: 0,
     episodicClustered: 0, episodicSummarized: 0,
-    selfOrganized: 0,
+    selfOrganized: 0, scratchPurged: 0,
   };
 
   let chunks = await storage.listChunks();
+
+  // Scratch tier: session-only memories. Purge expired ones first, then
+  // exclude live scratch from all other consolidation paths so they never
+  // get linked, decayed, merged, or promoted.
+  stats.scratchPurged = await purgeExpiredScratch(storage, chunks);
+  chunks = chunks.filter(c => c.tier !== 'scratch');
 
   // Biased replay: prioritize chunks by importance * recency * surprise
   if (cfg.enableBiasedReplay) {
@@ -59,6 +68,24 @@ export async function consolidate(storage: Storage, config?: SmartMemoryConfig):
   }
 
   return stats;
+}
+
+// ── Scratch tier: session-only memories ──────────────────────────────
+// Created by callers who want to keep something in the working set without
+// it being treated as canonical knowledge. Purged after SCRATCH_TTL_MS unless
+// promoted explicitly via memory_scratch_promote.
+
+async function purgeExpiredScratch(storage: Storage, chunks: StoredChunk[]): Promise<number> {
+  let purged = 0;
+  const now = Date.now();
+  for (const chunk of chunks) {
+    if (chunk.tier !== 'scratch') continue;
+    if (now - new Date(chunk.createdAt).getTime() >= SCRATCH_TTL_MS) {
+      await storage.deleteChunk(chunk.id);
+      purged++;
+    }
+  }
+  return purged;
 }
 
 // ── Daily → Short-term ───────────────────────────────────────────────
@@ -115,6 +142,9 @@ async function demoteToArchive(storage: Storage, chunks: StoredChunk[]): Promise
 
   for (const chunk of chunks) {
     if (chunk.tier !== 'long-term') continue;
+    // User-asserted memories are user-territory: never auto-archive.
+    // The user can explicitly delete or update_metadata to retire them.
+    if (chunk.origin === 'user') continue;
 
     const ageMs = now - new Date(chunk.createdAt).getTime();
     const lastRecallMs = chunk.lastRecalledAt
@@ -245,7 +275,10 @@ async function decayIrrelevant(storage: Storage, chunks: StoredChunk[]): Promise
     if (irrelevant >= 3) {
       const newImportance = Math.max(0.05, chunk.importance - 0.2);
       await storage.updateChunk(chunk.id, { importance: newImportance });
-      if (newImportance <= 0.1) {
+      // Never auto-archive user-asserted memories on recall-outcome decay —
+      // the user explicitly saved them; "irrelevant for this query" doesn't
+      // mean retire.
+      if (newImportance <= 0.1 && chunk.origin !== 'user') {
         await storage.updateChunk(chunk.id, { tier: 'archive' });
       }
       decayed++;
@@ -276,8 +309,23 @@ async function mergeNearDuplicates(storage: Storage, chunks: StoredChunk[]): Pro
       if (!other.embedding || !chunk.embedding) continue;
 
       if (cosineSimilarity(chunk.embedding, other.embedding) > 0.9) {
-        const keeper = chunk.importance >= other.importance ? chunk : other;
-        const loser = keeper === chunk ? other : chunk;
+        // Pick keeper by importance, but a user-origin memory always wins
+        // over a derived one — user-asserted text is canonical, never
+        // displaced by an auto-extracted near-duplicate.
+        let keeper: StoredChunk;
+        let loser: StoredChunk;
+        if (chunk.origin === 'user' && other.origin !== 'user') {
+          keeper = chunk; loser = other;
+        } else if (other.origin === 'user' && chunk.origin !== 'user') {
+          keeper = other; loser = chunk;
+        } else if (chunk.origin === 'user' && other.origin === 'user') {
+          // Both user-asserted near-duplicates: leave both. Merging would
+          // delete content the user explicitly wrote.
+          continue;
+        } else {
+          keeper = chunk.importance >= other.importance ? chunk : other;
+          loser = keeper === chunk ? other : chunk;
+        }
 
         await storage.updateChunk(keeper.id, {
           recallCount: keeper.recallCount + loser.recallCount,

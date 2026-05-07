@@ -745,9 +745,14 @@ export async function selectRelevant(config, query, candidates) {
 export function formatRecalledMemories(results) {
     if (results.length === 0)
         return '';
-    const procedural = results.filter(r => r.chunk.cognitiveLayer === 'procedural');
-    const semantic = results.filter(r => r.chunk.cognitiveLayer === 'semantic');
-    const episodic = results.filter(r => r.chunk.cognitiveLayer === 'episodic');
+    // Defensive: parent containers (consolidationLevel === -1) are storage
+    // scaffolding for sub-chunked content, not user-facing memories. The
+    // search paths normally drop them, but filter here too so they can never
+    // surface their full untrimmed content into the prompt.
+    const visible = results.filter(r => r.chunk.consolidationLevel !== -1);
+    const procedural = visible.filter(r => r.chunk.cognitiveLayer === 'procedural');
+    const semantic = visible.filter(r => r.chunk.cognitiveLayer === 'semantic');
+    const episodic = visible.filter(r => r.chunk.cognitiveLayer === 'episodic');
     const sections = [];
     if (procedural.length > 0) {
         sections.push('## How this user works');

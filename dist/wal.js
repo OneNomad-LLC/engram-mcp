@@ -44,7 +44,7 @@ export async function ingest(config, storage, entries) {
             effectiveImportance = Math.min(1, effectiveImportance + emotionBoost);
         }
         const baseMeta = {
-            tier: 'short-term',
+            tier: entry.tier ?? 'short-term',
             type: baseType,
             cognitiveLayer: baseLayer,
             tags: entry.tags ?? [],
@@ -58,6 +58,7 @@ export async function ingest(config, storage, entries) {
             recallCount: 0,
             relatedMemories: [],
             recallOutcomes: [],
+            origin: entry.origin ?? 'derived',
         };
         // Check if content should be split into sub-chunks
         const splitResult = config.enableChunking ? chunkContent(trimmedContent) : { chunks: [trimmedContent], needsSplit: false };

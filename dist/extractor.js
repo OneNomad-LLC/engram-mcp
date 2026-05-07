@@ -114,6 +114,7 @@ export async function extractFromConversation(config, storage, messages, convers
             recallCount: 0,
             relatedMemories: [],
             recallOutcomes: [],
+            origin: 'extracted',
         };
         // Generate embedding (optional -- search falls back to keyword)
         try {

@@ -131,6 +131,7 @@ export async function extractFromConversation(
       recallCount: 0,
       relatedMemories: [],
       recallOutcomes: [],
+      origin: 'extracted',
     };
 
     // Generate embedding (optional -- search falls back to keyword)

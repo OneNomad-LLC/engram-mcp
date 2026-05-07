@@ -63,6 +63,7 @@ export async function mem0Extract(config, storage, messages, conversationId) {
             recallCount: 0,
             relatedMemories: [],
             recallOutcomes: [],
+            origin: 'extracted',
         };
         await storage.saveChunk(chunk);
         chunks.push(chunk);
@@ -131,6 +132,7 @@ export async function mem0SyncAll(config, storage) {
             recallCount: 0,
             relatedMemories: [],
             recallOutcomes: [],
+            origin: 'extracted',
         };
         await storage.saveChunk(chunk);
         existingContents.add(content.toLowerCase().trim());

@@ -83,15 +83,30 @@ This is where the interesting stuff happens. A query goes through nine stages be
 
 ### Memory Tiers
 
-Memories flow through four tiers with automatic promotion and demotion:
+Memories flow through four tiers with automatic promotion and demotion, plus a fifth scratch tier that sits outside the lifecycle:
 
 ```
+scratch (24h, never promoted, manual promote only)
+
 daily (2 days) --> short-term (14 days) --> long-term (90 days) --> archive
                         ^                                             |
                         +------ reactivation (if recalled) -----------+
 ```
 
 Promotion isn't just about age. A memory moves to long-term if it's been recalled multiple times, has high importance, received "helpful" feedback, or is a procedural rule. Memories that keep getting recalled stay promoted. Memories that never get touched decay and eventually archive.
+
+**Scratch tier** is for exploratory, session-only notes that you may want to discard. Pass `tier: 'scratch'` to `memory_ingest` and the chunk is excluded from every consolidation path: no promotion, no merging, no decay-to-archive, no linking. After 24 hours scratch chunks are auto-purged. Use `memory_scratch_promote` to graduate one to short-term once you've decided it's worth keeping.
+
+### Memory Origin
+
+Every chunk carries an `origin` tag that distinguishes user-asserted memory from auto-derived memory:
+
+- **`user`** — written explicitly via `memory_ingest`. Treated as canonical user-territory: the consolidator never auto-merges, near-duplicate-deletes, or archives these. Importance still decays normally, but the content and lifecycle stay sacred.
+- **`extracted`** — pulled from a conversation by `memory_extract` or the Mem0 provider.
+- **`imported`** — bulk-loaded via `memory_import`.
+- **`derived`** — produced by consolidation (e.g. episodic-to-semantic summaries).
+
+The split mirrors the journal pattern in [Persona](https://github.com/mattstvartak/persona): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
 
 Importance decays exponentially over time, but the rates differ by cognitive layer:
 - **Procedural** (rules): decays slowest (0.98/week, floor 0.15). Rules tend to stay relevant.
@@ -274,14 +289,15 @@ Then point your MCP client at `dist/server.js`:
 
 ## Tools
 
-The MCP server exposes 19 tools across six groups. Several earlier tools (`memory_format`, `memory_check_duplicate`, `memory_extract_rules`, `memory_taxonomy`, `memory_kg_stats`) were folded into their parent tools in 1.0.0-beta.6 — pass the relevant flag or mode to the parent instead. 1.0.0-beta.8 adds the Handoff tools for cross-session continuity.
+The MCP server exposes 20 tools across six groups. Several earlier tools (`memory_format`, `memory_check_duplicate`, `memory_extract_rules`, `memory_taxonomy`, `memory_kg_stats`) were folded into their parent tools in 1.0.0-beta.6 — pass the relevant flag or mode to the parent instead. 1.0.0-beta.8 added the Handoff tools for cross-session continuity. 1.0.0 adds the memory origin field (user vs derived), the scratch tier, and `memory_scratch_promote`.
 
 ### Core Memory
 
 | Tool | What it does |
 |------|-------------|
 | `memory_search` | Hybrid ANN + keyword search with spreading activation. Supports a formatted output mode for prompt injection (replaces the old `memory_format`). |
-| `memory_ingest` | Write-ahead log: immediately persist a memory before responding. Runs duplicate detection inline (replaces `memory_check_duplicate`). |
+| `memory_ingest` | Write-ahead log: immediately persist a memory before responding. Runs duplicate detection inline (replaces `memory_check_duplicate`). Defaults `origin='user'` since explicit ingest is user-asserted; pass `tier: 'scratch'` for session-only notes. |
+| `memory_scratch_promote` | Graduate a scratch-tier memory to short-term so it survives the 24h auto-purge and enters the normal consolidation lifecycle. |
 | `memory_extract` | Extract memories from a conversation (LLM or heuristic). Rules-only mode replaces the old `memory_extract_rules`. |
 | `memory_maintain` | Run consolidation (decay, promote, link, merge, self-organize). Auto-describes unnamed memories, generates cross-links, and syncs the Persona procedural bridge when both servers are running. |
 | `memory_rules` | Show active procedural rules |

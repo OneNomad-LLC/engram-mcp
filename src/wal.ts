@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { SmartMemoryConfig, MemoryType, CognitiveLayer, Sentiment } from './types.js';
+import type { SmartMemoryConfig, MemoryType, CognitiveLayer, Sentiment, MemoryOrigin, MemoryTier } from './types.js';
 import type { StoredChunk } from './storage.js';
 import { Storage } from './storage.js';
 import { embed } from './llm.js';
@@ -43,6 +43,8 @@ export interface IngestEntry {
   sentiment?: Sentiment;
   emotionalValence?: number;  // -1 (negative) to 1 (positive), from Persona bridge
   emotionalArousal?: number;  // 0 to 1, from Persona bridge
+  origin?: MemoryOrigin;      // 'user' = explicit ingest, 'derived'/'extracted'/'imported' = auto
+  tier?: MemoryTier;          // Override default tier ('scratch' for session-only)
 }
 
 /**
@@ -81,7 +83,7 @@ export async function ingest(
     }
 
     const baseMeta = {
-      tier: 'short-term' as const,
+      tier: entry.tier ?? 'short-term' as MemoryTier,
       type: baseType,
       cognitiveLayer: baseLayer,
       tags: entry.tags ?? [],
@@ -95,6 +97,7 @@ export async function ingest(
       recallCount: 0,
       relatedMemories: [],
       recallOutcomes: [],
+      origin: entry.origin ?? 'derived' as MemoryOrigin,
     };
 
     // Check if content should be split into sub-chunks
