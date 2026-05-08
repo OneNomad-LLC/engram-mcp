@@ -2,3 +2,4 @@ node_modules/
 *.db
 lance/
 benchmarks/data/
+.claude/settings.local.json
