@@ -62,7 +62,7 @@ function json(data: any) { return text(JSON.stringify(data, null, 2)); }
 // ── MCP Server ──────────────────────────────────────────────────────
 
 const server = new McpServer(
-  { name: 'engram', version: '2.2.0' },
+  { name: 'engram', version: '2.3.0' },
   {
     instructions: [
       'Engram is your long-term memory.',
@@ -134,6 +134,87 @@ server.registerTool(
       total: results.length,
       selected: selected.length,
       results: selected.map(r => ({
+        id: r.chunk.id,
+        content: r.chunk.content,
+        type: r.chunk.type,
+        layer: r.chunk.cognitiveLayer,
+        tier: r.chunk.tier,
+        domain: r.chunk.domain || undefined,
+        topic: r.chunk.topic || undefined,
+        tags: r.chunk.tags.length > 0 ? r.chunk.tags : undefined,
+        source: r.chunk.source || undefined,
+        createdAt: r.chunk.createdAt || undefined,
+        importance: r.chunk.importance,
+        score: Math.round(r.score * 1000) / 1000,
+      })),
+    });
+  }
+);
+
+server.registerTool(
+  'memory_budget',
+  {
+    title: 'Search Memories Within a Token Budget',
+    description: [
+      'Like memory_search, but returns memories that fit within a TOKEN BUDGET instead of a count limit.',
+      'Greedy fill from highest-relevance memories: candidates ranked by score × importance, included until the next entry would exceed the budget.',
+      'Used by Pyre\'s Context Budget Engine: the persona/memories slot allocates N tokens, and Engram returns "the most useful subset that fits."',
+      'Returns the same memory shape as memory_search plus { budgetTokens, usedTokens, includedCount, candidateCount } so callers can see how the budget got spent.',
+    ].join(' '),
+    inputSchema: z.object({
+      query: z.string().describe('Natural language search query.'),
+      budgetTokens: z.number().min(50).max(50000).describe('Token budget for the returned set. Greedy fill stops before exceeding this. Recommended range: 200 (tight slot) to 5000 (generous).'),
+      candidateLimit: z.number().min(1).max(500).optional().describe('Max candidates to consider before budget filtering (default: 50). Larger candidate pool = better quality picks but slower search.'),
+      domain: z.string().optional().describe('Filter by domain/project.'),
+      topic: z.string().optional().describe('Filter by topic.'),
+      tag: z.string().optional().describe('Filter by exact tag match.'),
+      format: z.boolean().optional().describe('If true, returns formatted text grouped by cognitive layer instead of JSON.'),
+    }),
+  },
+  async ({ query, budgetTokens, candidateLimit, domain, topic, tag, format: formatOutput }) => {
+    const storage = await ensureStorage();
+    const candidates = await search(config, storage, query, candidateLimit ?? 50, { domain, topic, tag });
+
+    // Greedy budget fill. Sort by relevance score × importance (the
+    // composite "useful here AND useful in general" signal). Token
+    // estimate is conservative: 4 chars/token for English-prose
+    // memory content + a 30-token wrapper overhead per entry for
+    // type/source/tags rendering. Slightly over-estimating beats
+    // under-estimating; the budget caller (Pyre's CBE) prefers a
+    // small remainder over a hard overflow.
+    const ranked = candidates
+      .map((r) => ({ r, weight: r.score * (r.chunk.importance + 0.1) }))
+      .sort((a, b) => b.weight - a.weight);
+
+    const selected: typeof candidates = [];
+    let usedTokens = 0;
+    const WRAPPER_OVERHEAD = 30;
+    const CHARS_PER_TOKEN = 4;
+    for (const { r } of ranked) {
+      const contentTokens = Math.ceil(r.chunk.content.length / CHARS_PER_TOKEN);
+      const entryTokens = contentTokens + WRAPPER_OVERHEAD;
+      if (usedTokens + entryTokens > budgetTokens) {
+        // Hit the budget. The remaining candidates would push us over;
+        // greedy stop here. Could continue scanning for a smaller
+        // entry that still fits, but the marginal token win usually
+        // isn't worth losing the strict importance ordering.
+        continue;
+      }
+      selected.push(r);
+      usedTokens += entryTokens;
+    }
+
+    if (formatOutput) {
+      const memText = formatRecalledMemories(selected);
+      return text(memText || 'No relevant memories found within budget.');
+    }
+
+    return json({
+      budgetTokens,
+      usedTokens,
+      includedCount: selected.length,
+      candidateCount: candidates.length,
+      results: selected.map((r) => ({
         id: r.chunk.id,
         content: r.chunk.content,
         type: r.chunk.type,
