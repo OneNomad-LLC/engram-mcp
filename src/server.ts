@@ -62,7 +62,7 @@ function json(data: any) { return text(JSON.stringify(data, null, 2)); }
 // ── MCP Server ──────────────────────────────────────────────────────
 
 const server = new McpServer(
-  { name: 'engram', version: '2.3.0' },
+  { name: 'engram', version: '2.4.0' },
   {
     instructions: [
       'Engram is your long-term memory.',
@@ -733,6 +733,137 @@ server.registerTool(
         subject: t.subject, predicate: t.predicate, object: t.object,
         validFrom: t.validFrom, validTo: t.validTo, active: !t.validTo,
       })),
+    });
+  }
+);
+
+server.registerTool(
+  'memory_dossier',
+  {
+    title: 'Entity Dossier',
+    description: [
+      'Aggregate everything Engram knows about an entity (person, project, concept) into a structured snapshot.',
+      'Pulls from THREE sources: (1) KG triples where the entity is subject — definitive facts; (2) memory chunks mentioning the entity in content/tags/topic — preferences, decisions, context; (3) recent activity ordered by createdAt — what came up lately.',
+      'Output is grouped by category (facts, preferences, decisions, corrections, recent) so the consumer doesn\'t have to bucket the chunks themselves.',
+      'Honors an optional budgetTokens cap; greedy fill within each category when set. Used by Pyre\'s Context Budget Engine to populate "what we know about <X>" slots without spending the entire memories budget on a search-by-relevance grab bag.',
+    ].join(' '),
+    inputSchema: z.object({
+      entity: z.string().describe('Entity name. Matches against KG subject, chunk content (substring), tags (exact), and topic (exact). Case-insensitive.'),
+      budgetTokens: z.number().min(100).max(50000).optional().describe('Optional token cap for the returned set. When set, each category fills greedy by importance until the per-category share is exhausted (~25% of budget per category). Without budget, returns up to maxPerCategory entries per category.'),
+      maxPerCategory: z.number().min(1).max(50).optional().describe('Max entries per category when budgetTokens is omitted (default: 5).'),
+      domain: z.string().optional().describe('Optional domain filter (limits dossier to a single project/scope).'),
+    }),
+  },
+  async ({ entity, budgetTokens, maxPerCategory, domain }) => {
+    const storage = await ensureStorage();
+    const cap = maxPerCategory ?? 5;
+    const entityLower = entity.toLowerCase();
+
+    // 1. KG triples where the entity is the subject (active facts).
+    //    Filtered to active by default — invalidated triples shouldn't
+    //    surface in a dossier.
+    const triples = await queryGraph(storage, {
+      subject: entity,
+      activeOnly: true,
+    });
+
+    // 2. Memory chunks mentioning the entity. Use a generous candidate
+    //    pool (entity-shaped queries are usually narrower than free-form
+    //    search), then filter client-side for the substring/tag/topic
+    //    match so we don't miss chunks the search ranker buried.
+    const candidates = await search(config, storage, entity, 100, { domain });
+    const matching = candidates.filter((r) => {
+      const c = r.chunk;
+      return c.content.toLowerCase().includes(entityLower)
+        || c.tags.some((t) => t.toLowerCase() === entityLower)
+        || c.topic.toLowerCase() === entityLower;
+    });
+
+    // Bucket by type. "context" maps into recent rather than its own
+    // category since context is usually time-sensitive — last week's
+    // context is less interesting than last week's preference.
+    const buckets: Record<string, typeof matching> = {
+      facts: [],
+      preferences: [],
+      decisions: [],
+      corrections: [],
+      recent: [],
+    };
+    for (const r of matching) {
+      const t = r.chunk.type;
+      if (t === 'fact') buckets.facts.push(r);
+      else if (t === 'preference') buckets.preferences.push(r);
+      else if (t === 'decision') buckets.decisions.push(r);
+      else if (t === 'correction') buckets.corrections.push(r);
+      // context is intentionally not its own bucket — falls into recent
+    }
+    // Recent = top-N most recently created chunks across ALL types,
+    // independent of category. Catches active context + new
+    // facts/preferences regardless of where they bucketed.
+    buckets.recent = [...matching]
+      .sort((a, b) => (b.chunk.createdAt ?? '').localeCompare(a.chunk.createdAt ?? ''))
+      .slice(0, cap);
+
+    // Per-category importance sort + cap.
+    for (const k of Object.keys(buckets)) {
+      if (k === 'recent') continue;
+      buckets[k] = buckets[k]
+        .sort((a, b) => b.chunk.importance - a.chunk.importance)
+        .slice(0, cap);
+    }
+
+    // Optional token-budget enforcement. Splits budget evenly across
+    // the 5 categories (facts / preferences / decisions / corrections
+    // / recent) and greedy-fills each within its share. Same 4
+    // chars/token + 30 wrapper estimate as memory_budget.
+    let usedTokens = 0;
+    if (typeof budgetTokens === 'number' && budgetTokens > 0) {
+      const perCategoryBudget = Math.floor(budgetTokens / 5);
+      const CHARS_PER_TOKEN = 4;
+      const WRAPPER_OVERHEAD = 30;
+      for (const k of Object.keys(buckets)) {
+        let categoryUsed = 0;
+        const filtered: typeof buckets[string] = [];
+        for (const r of buckets[k]) {
+          const t = Math.ceil(r.chunk.content.length / CHARS_PER_TOKEN) + WRAPPER_OVERHEAD;
+          if (categoryUsed + t > perCategoryBudget) continue;
+          filtered.push(r);
+          categoryUsed += t;
+          usedTokens += t;
+        }
+        buckets[k] = filtered;
+      }
+    }
+
+    const renderBucket = (entries: typeof matching) =>
+      entries.map((r) => ({
+        id: r.chunk.id,
+        content: r.chunk.content,
+        type: r.chunk.type,
+        importance: r.chunk.importance,
+        createdAt: r.chunk.createdAt || undefined,
+        domain: r.chunk.domain || undefined,
+        topic: r.chunk.topic || undefined,
+        tags: r.chunk.tags.length > 0 ? r.chunk.tags : undefined,
+      }));
+
+    return json({
+      entity,
+      budgetTokens: budgetTokens ?? null,
+      usedTokens: budgetTokens ? usedTokens : undefined,
+      kgFacts: triples.map((t) => ({
+        id: t.id,
+        predicate: t.predicate,
+        object: t.object,
+        confidence: t.confidence,
+        validFrom: t.validFrom,
+      })),
+      facts: renderBucket(buckets.facts),
+      preferences: renderBucket(buckets.preferences),
+      decisions: renderBucket(buckets.decisions),
+      corrections: renderBucket(buckets.corrections),
+      recent: renderBucket(buckets.recent),
+      candidateCount: matching.length,
     });
   }
 );
