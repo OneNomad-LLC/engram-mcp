@@ -106,7 +106,7 @@ Every chunk carries an `origin` tag that distinguishes user-asserted memory from
 - **`imported`** — bulk-loaded via `memory_import`.
 - **`derived`** — produced by consolidation (e.g. episodic-to-semantic summaries).
 
-The split mirrors the journal pattern in [Persona](https://github.com/mattstvartak/persona): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
+The split mirrors the journal pattern in [Persona](https://github.com/OneNomad-LLC/persona): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
 
 Importance decays exponentially over time, but the rates differ by cognitive layer:
 - **Procedural** (rules): decays slowest (0.98/week, floor 0.15). Rules tend to stay relevant.
@@ -255,7 +255,7 @@ Add to your client's MCP config:
 ### From Source
 
 ```bash
-git clone https://github.com/mattstvartak/engram.git
+git clone https://github.com/OneNomad-LLC/engram.git
 cd engram
 npm install
 npm run build
@@ -484,7 +484,7 @@ Here are some real situations where this makes a difference.
 
 ## Pairs Well With: Persona MCP
 
-If Engram is the brain, [Persona](https://github.com/mattstvartak/persona) is the personality.
+If Engram is the brain, [Persona](https://github.com/OneNomad-LLC/persona) is the personality.
 
 Engram handles *what* the agent remembers: facts, preferences, rules, timelines. Persona handles *how* the agent communicates: tone, verbosity, format preferences, and communication style. They solve different problems but work best together.
 
