@@ -6,6 +6,7 @@ import { embed } from './llm.js';
 import { buildContextPrefix } from './utils.js';
 import { chunkContent } from './chunker.js';
 import { extractAndPersistTriples } from './kg-extractor.js';
+import { sourceDedup } from './source-dedup.js';
 
 // Lightweight poisoning patterns checked at ingest time (no LLM, no search)
 const POISON_PATTERNS = [
@@ -69,6 +70,44 @@ export async function ingest(
       console.error(`Engram governance: ${poisonFlag} in "${trimmedContent.slice(0, 80)}..."`);
     }
 
+    // Same-source ingest dedup. When the agent re-reads a stable file
+    // or re-polls an unchanged endpoint within the same Engram process,
+    // we've already chunked + embedded + saved this content. Look up
+    // the (source, content-hash) pair in the in-memory cache and short-
+    // circuit the rest of the pipeline on a hit. Reuses the prior
+    // chunk(s) rather than writing duplicates.
+    //
+    // Bounded session-scoped cache (max 64 sources × 8 hashes); see
+    // source-dedup.ts. Persistence layer doesn't change.
+    const cached = sourceDedup.lookup(entry.source, trimmedContent);
+    if (cached) {
+      // Materialize a chunk reference for the caller from the cached
+      // metadata. We don't re-fetch the actual StoredChunk from disk —
+      // the caller's response only needs id + content + minimal meta,
+      // and the agent's history is keyed off `id`.
+      const stub: StoredChunk = {
+        id: cached.chunkId,
+        tier: entry.tier ?? 'short-term',
+        type: entry.type ?? 'context',
+        cognitiveLayer: entry.layer ?? 'episodic',
+        tags: entry.tags ?? [],
+        domain: entry.domain ?? '',
+        topic: entry.topic ?? '',
+        source: entry.source ?? '',
+        importance: entry.importance ?? 0.5,
+        sentiment: entry.sentiment ?? 'neutral',
+        createdAt: new Date().toISOString(),
+        lastRecalledAt: null,
+        recallCount: 0,
+        relatedMemories: [],
+        recallOutcomes: [],
+        origin: entry.origin ?? 'derived',
+        content: trimmedContent,
+      } as StoredChunk;
+      chunks.push(stub);
+      continue;
+    }
+
     const baseType = entry.type ?? inferType(trimmedContent);
     const baseLayer = entry.layer ?? inferLayer(trimmedContent);
     // Emotion-weighted importance: high-arousal events get stronger encoding
@@ -113,6 +152,10 @@ export async function ingest(
       };
       await storage.saveChunk(parentChunk);
       chunks.push(parentChunk);
+      // Remember the parent chunk id keyed by source so a re-ingest
+      // of the identical content within the same process returns this
+      // same id and skips chunk+embed+save entirely.
+      sourceDedup.remember(entry.source, trimmedContent, parentChunk.id);
 
       // Save sub-chunks with embeddings
       for (const subContent of splitResult.chunks) {
@@ -167,6 +210,8 @@ export async function ingest(
 
       await storage.saveChunk(chunk);
       chunks.push(chunk);
+      // Single-chunk path: cache the chunk id keyed by source.
+      sourceDedup.remember(entry.source, trimmedContent, chunk.id);
     }
   }
 
