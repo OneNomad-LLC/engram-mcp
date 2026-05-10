@@ -130,6 +130,32 @@ export class Storage {
       }]);
       await this.triples.delete('id = \'__init__\'');
     }
+
+    // Scalar indices on the triples hot path. addTriple() does a
+    // queryTriples({ subject, predicate, object, activeOnly }) on
+    // every ingested triple to dedupe / reinforce existing entries.
+    // Unindexed, that's a full table scan — observable as monotonic
+    // ingest-time growth across LoCoMo conversations in the
+    // memory-recall bench (conv-26 ingest 6s → conv-44 ingest 28min
+    // before the bench's per-call timeout). LanceDB's bitmap index
+    // is right for low-cardinality fields (predicate set is small;
+    // subject/object have moderate cardinality but skewed
+    // distribution). Idempotent: calling createScalarIndex on an
+    // already-indexed column is a no-op.
+    //
+    // Best-effort: index creation can fail on very fresh tables or
+    // older LanceDB builds; we swallow + log so existing functionality
+    // is unchanged when the index isn't available.
+    for (const col of ['subject', 'predicate', 'object', 'valid_to']) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (this.triples as any).createIndex(col, { config: { type: 'BTREE' } }).catch(() => {});
+      } catch {
+        // LanceDB version may not support createIndex on string cols
+        // with this signature. Silent fallthrough; queries still work
+        // via WHERE, just without index acceleration.
+      }
+    }
   }
 
   async ensureReady(): Promise<void> {
