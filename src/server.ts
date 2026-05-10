@@ -13,6 +13,7 @@ import {
 import { loadConfig } from './config.js';
 import { isLlmAvailable } from './llm.js';
 import { search, selectRelevant, formatRecalledMemories } from './search.js';
+import { graphAwareRerank } from './graph-rerank.js';
 import { extractFromConversation } from './extractor.js';
 import { consolidate } from './consolidator.js';
 import { extractRules, formatRulesForPrompt } from './procedural.js';
@@ -39,6 +40,7 @@ import { runGovernanceCheck, detectContradictions } from './governance.js';
 import { syncBridge, loadBridgeFile } from './procedural-bridge.js';
 import { writeHandoff, readHandoff, listHandoffs } from './handoff.js';
 import { assessPressure } from './context-pressure.js';
+import { listRecentTraces, gcOldTraces } from './retrieval-trace.js';
 
 // ── Config & Storage ────────────────────────────────────────────────
 
@@ -102,9 +104,10 @@ server.registerTool(
       tag: z.string().optional().describe('Filter by exact tag match. Consumer-defined (e.g. "cortex_type:action_item").'),
       cognitiveLoad: z.enum(['low', 'normal', 'high']).optional().describe('From Persona. "high" returns top 3 only.'),
       format: z.boolean().optional().describe('If true, returns formatted text grouped by cognitive layer instead of JSON.'),
+      graphRerank: z.boolean().optional().describe('If true, run results through 1-hop graph-aware reranking (HippoRAG-lite) — boosts chunks that are KG-connected to the top similarity matches. Helps multi-hop questions where the answer is one graph hop away.'),
     }),
   },
-  async ({ query, maxResults, domain, topic, tag, cognitiveLoad, format: formatOutput }) => {
+  async ({ query, maxResults, domain, topic, tag, cognitiveLoad, format: formatOutput, graphRerank }) => {
     let effectiveMaxResults = maxResults;
     if (cognitiveLoad === 'high') {
       effectiveMaxResults = Math.min(effectiveMaxResults ?? 10, 3);
@@ -116,6 +119,20 @@ server.registerTool(
       selected = await selectRelevant(config, query, results);
     } catch {
       selected = results.slice(0, cognitiveLoad === 'high' ? 3 : 5);
+    }
+    // Optional 1-hop graph-aware rerank. When the caller knows their
+    // workload has multi-hop QA shape (LoCoMo-style "where does X
+    // live, and what's the weather like there"), this catches chunks
+    // that are KG-connected to the top similarity matches but didn't
+    // win on similarity alone. No-op on memory stores without graph
+    // data.
+    if (graphRerank) {
+      try {
+        selected = await graphAwareRerank(storage, selected);
+      } catch {
+        // graph rerank is opportunistic — fall through to similarity-
+        // only results on any error.
+      }
     }
     if (cognitiveLoad === 'high' && selected.length > 3) {
       selected = selected
@@ -743,7 +760,7 @@ server.registerTool(
     title: 'Entity Dossier',
     description: [
       'Aggregate everything Engram knows about an entity (person, project, concept) into a structured snapshot.',
-      'Pulls from THREE sources: (1) KG triples where the entity is subject — definitive facts; (2) memory chunks mentioning the entity in content/tags/topic — preferences, decisions, context; (3) recent activity ordered by createdAt — what came up lately.',
+      'Pulls from FOUR sources: (1) KG triples where the entity is subject — definitive facts about the entity; (2) KG triples where the entity is object — facts where others reference the entity (e.g. "Alice reports-to Matt" appears in Matt\'s dossier as referencedBy); (3) memory chunks mentioning the entity in content/tags/topic — preferences, decisions, context; (4) recent activity ordered by createdAt — what came up lately.',
       'Output is grouped by category (facts, preferences, decisions, corrections, recent) so the consumer doesn\'t have to bucket the chunks themselves.',
       'Honors an optional budgetTokens cap; greedy fill within each category when set. Used by Pyre\'s Context Budget Engine to populate "what we know about <X>" slots without spending the entire memories budget on a search-by-relevance grab bag.',
     ].join(' '),
@@ -759,11 +776,21 @@ server.registerTool(
     const cap = maxPerCategory ?? 5;
     const entityLower = entity.toLowerCase();
 
-    // 1. KG triples where the entity is the subject (active facts).
-    //    Filtered to active by default — invalidated triples shouldn't
-    //    surface in a dossier.
+    // 1a. KG triples where the entity is the subject (active facts).
+    //     Filtered to active by default — invalidated triples shouldn't
+    //     surface in a dossier.
     const triples = await queryGraph(storage, {
       subject: entity,
+      activeOnly: true,
+    });
+
+    // 1b. KG triples where the entity is the OBJECT — facts about the
+    //     entity asserted from someone else's perspective (e.g.
+    //     "Alice reports-to Matt" should appear in Matt's dossier as
+    //     a referencedBy edge). Without this, the dossier only shows
+    //     outbound relationships and misses inbound ones.
+    const referencedBy = await queryGraph(storage, {
+      object: entity,
       activeOnly: true,
     });
 
@@ -855,6 +882,13 @@ server.registerTool(
         id: t.id,
         predicate: t.predicate,
         object: t.object,
+        confidence: t.confidence,
+        validFrom: t.validFrom,
+      })),
+      referencedBy: referencedBy.map((t) => ({
+        id: t.id,
+        subject: t.subject,
+        predicate: t.predicate,
         confidence: t.confidence,
         validFrom: t.validFrom,
       })),
@@ -988,6 +1022,44 @@ server.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────
+// DIAGNOSTIC RETRIEVAL TRACES
+// ─────────────────────────────────────────────────────────────────────
+
+server.registerTool(
+  'memory_trace_recent',
+  {
+    title: 'Recent Retrieval Traces',
+    description: [
+      'List the most recent diagnostic retrieval traces. Each trace captures: query text, filters, per-stage candidate counts (corpus → vector above/below floor → keyword → final), result IDs, and total latency.',
+      'Use this when investigating "why didn\'t you find the obvious doc" complaints — the trace shows whether the result was retrieved at all, whether it survived the floor, and which stage dropped it.',
+      'Traces only persist when ENGRAM_ENABLE_RETRIEVAL_TRACES=true (default off). Returns an empty list when traces are disabled or no searches have run.',
+    ].join(' '),
+    inputSchema: z.object({
+      limit: z.number().min(1).max(200).optional().describe('Max traces to return (default: 25, max: 200).'),
+    }),
+  },
+  async ({ limit }) => {
+    if (!config.enableRetrievalTraces) {
+      return json({
+        enabled: false,
+        traces: [],
+        note: 'Retrieval traces are disabled. Enable with ENGRAM_ENABLE_RETRIEVAL_TRACES=true (then restart Engram).',
+      });
+    }
+    const traces = await listRecentTraces(
+      { dataDir: config.dataDir, retentionDays: config.retrievalTraceRetentionDays },
+      limit ?? 25,
+    );
+    return json({
+      enabled: true,
+      retentionDays: config.retrievalTraceRetentionDays,
+      count: traces.length,
+      traces,
+    });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────
 // IMPORT
 // ─────────────────────────────────────────────────────────────────────
 
@@ -1018,6 +1090,13 @@ async function main(): Promise<void> {
   console.error(`LLM: ${isLlmAvailable() ? 'enabled' : 'disabled (heuristic mode)'}`);
   console.error(`Embeddings: local (${process.env.ENGRAM_EMBEDDING_MODEL ?? process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2'})`);
   console.error(`Mem0: ${config.mem0ApiKey ? 'enabled' : 'disabled'}`);
+  console.error(`Retrieval traces: ${config.enableRetrievalTraces ? `enabled (${config.retrievalTraceRetentionDays}d retention)` : 'disabled'}`);
+
+  // Best-effort trace GC on startup. Drops day-directories older than
+  // retentionDays. Cheap when the feature is off (no traces dir to scan).
+  if (config.enableRetrievalTraces) {
+    void gcOldTraces({ dataDir: config.dataDir, retentionDays: config.retrievalTraceRetentionDays });
+  }
 }
 
 main().catch(err => {
