@@ -1,7 +1,7 @@
 ---
 name: engram
 description: Intelligent memory manager with LLM-powered extraction, hybrid ANN vector+keyword search, tier lifecycle, spreading activation, procedural rules, WAL capture, and session-state hot RAM. Use when the user asks about memory, preferences, or past conversations.
-homepage: https://github.com/OneNomad-LLC/engram
+homepage: https://github.com/OneNomad-LLC/engram-mcp
 metadata: {"version":"1.0.0-beta.2","categories":["memory","intelligence","personalization"]}
 ---
 

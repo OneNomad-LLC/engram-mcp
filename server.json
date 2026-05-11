@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.onenomad-llc/engram-mcp",
+  "description": "Engram — memory MCP server for Claude Code. LLM-powered extraction, hybrid ANN search, tier lifecycle, spreading activation, procedural rules, WAL, Mem0, and session-state.",
+  "repository": {
+    "url": "https://github.com/OneNomad-LLC/engram-mcp",
+    "source": "github"
+  },
+  "version": "1.0.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@onenomad/engram-memory",
+      "version": "1.0.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OPENROUTER_API_KEY",
+          "description": "OpenRouter API key for LLM-powered extraction and re-ranking. Any model on openrouter.ai works. Without this, extraction/re-rank features are disabled.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "ENGRAM_DATA_DIR",
+          "description": "Directory for the LanceDB store and WAL. Defaults to ~/.claude/engram.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "filepath"
+        }
+      ]
+    }
+  ]
+}

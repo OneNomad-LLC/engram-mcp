@@ -6,8 +6,8 @@
     "name": "Matt Stvartak",
     "email": "matt@onenomad.dev"
   },
-  "homepage": "https://github.com/OneNomad-LLC/engram",
-  "repository": "https://github.com/OneNomad-LLC/engram",
-  "license": "BUSL-1.1",
+  "homepage": "https://github.com/OneNomad-LLC/engram-mcp",
+  "repository": "https://github.com/OneNomad-LLC/engram-mcp",
+  "license": "Apache-2.0",
   "keywords": ["memory", "ai", "mcp", "vector-search", "knowledge-graph", "recall"]
 }

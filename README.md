@@ -255,8 +255,8 @@ Add to your client's MCP config:
 ### From Source
 
 ```bash
-git clone https://github.com/OneNomad-LLC/engram.git
-cd engram
+git clone https://github.com/OneNomad-LLC/engram-mcp.git
+cd engram-mcp
 npm install
 npm run build
 ```
