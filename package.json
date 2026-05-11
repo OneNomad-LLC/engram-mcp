@@ -1,10 +1,19 @@
 {
   "name": "@onenomad/engram-memory",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "mcpName": "io.github.onenomad-llc/engram-mcp",
-  "description": "Engram — memory MCP server for Claude Code. LLM-powered extraction, hybrid ANN search, tier lifecycle, spreading activation, procedural rules, WAL, Mem0, and session-state.",
+  "description": "Engram — memory MCP server for Claude Code, plus a library API for direct in-process use. LLM-powered extraction, hybrid ANN search, tier lifecycle, spreading activation, procedural rules, real-time ingest, Mem0, and session-state.",
   "type": "module",
-  "main": "dist/server.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": "./dist/server.js",
+    "./cli": "./dist/cli.js"
+  },
   "bin": {
     "engram-memory": "dist/server.js",
     "engram-mcp": "dist/cli.js"
