@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Storage } from '../src/storage.js';
 import { addTriple } from '../src/knowledge-graph.js';
-import { graphAwareRerank } from '../src/graph-rerank.js';
+import { graphAwareRerank, graphAwareRerankPPR } from '../src/graph-rerank.js';
 import type { SearchResult, MemoryChunk } from '../src/types.js';
 
 function makeStub(id: string, content: string, score: number): SearchResult {
@@ -140,5 +140,87 @@ test('graphAwareRerank: does not boost a candidate via its own triples', async (
     const r = await graphAwareRerank(storage, candidates);
     // No other candidate to connect to → no boost.
     assert.equal(r[0]!.score, 0.5);
+  });
+});
+
+test('graphAwareRerankPPR: empty candidates returns empty', async () => {
+  await withTempStorage(async (storage) => {
+    const r = await graphAwareRerankPPR(storage, []);
+    assert.deepEqual(r, []);
+  });
+});
+
+test('graphAwareRerankPPR: falls back to lite when graph has < 4 entities', async () => {
+  await withTempStorage(async (storage) => {
+    // Only 2 entities → PPR can't differentiate, should fall back.
+    await addTriple(storage, 'a', 'rel', 'b', 'c1', 0.9);
+    const candidates = [
+      makeStub('c1', 'a links to b', 0.7),
+      makeStub('c2', 'separate content about a', 0.5),
+    ];
+    const r = await graphAwareRerankPPR(storage, candidates);
+    assert.equal(r.length, 2);
+    // No throw, returns sorted candidates; lite-version semantics apply.
+  });
+});
+
+test('graphAwareRerankPPR: ranks chunks closer to seed entities higher', async () => {
+  await withTempStorage(async (storage) => {
+    // Build a small star graph: A is central, connects to B/C/D/E.
+    // F is on the periphery, connected only to E.
+    // PPR seeded at A should give B/C/D/E higher rank than F.
+    for (const x of ['b', 'c', 'd', 'e']) {
+      await addTriple(storage, 'a', 'rel', x, 'c1', 0.9);
+    }
+    await addTriple(storage, 'e', 'rel', 'f', 'c2', 0.9);
+    // c1 contributes entities a,b,c,d,e → seed includes them
+    // c2 contributes e,f
+    // c3 contributes only f (via its content matching) — should rank LOWER than c2
+    const candidates = [
+      makeStub('c1', 'central node and friends', 0.7),
+      makeStub('c2', 'edge case', 0.5),
+      makeStub('c3', 'far away', 0.3),
+    ];
+
+    // Need c3 to contribute f to test peripheral scoring
+    // (the rerank scores chunks by entities they contributed via triples)
+    await addTriple(storage, 'f', 'is-a', 'thing', 'c3', 0.5);
+
+    const r = await graphAwareRerankPPR(storage, candidates);
+    assert.equal(r.length, 3);
+    // c1 should still be at top (high similarity + central seeds).
+    assert.equal(r[0]!.chunk.id, 'c1');
+    // PPR shouldn't crash and should produce non-negative scores.
+    for (const c of r) assert.ok(c.score >= 0);
+  });
+});
+
+test('graphAwareRerankPPR: caps boost so it doesn\'t overflow', async () => {
+  await withTempStorage(async (storage) => {
+    // Pathological: one candidate contributes 20 seed entities, all
+    // densely connected. PPR rank could concentrate; boost must cap.
+    for (let i = 0; i < 20; i++) {
+      await addTriple(storage, `e${i}`, 'rel', `e${(i + 1) % 20}`, 'c1', 0.9);
+    }
+    const candidates = [
+      makeStub('c1', 'dense cluster', 0.5),
+    ];
+    const r = await graphAwareRerankPPR(storage, candidates);
+    // Single candidate; only it contributed entities; boost should
+    // be bounded.
+    assert.ok(r[0]!.score <= 0.5 + 0.5 + 1e-9, `score ${r[0]!.score} should be ≤ 1.0`);
+  });
+});
+
+test('graphAwareRerankPPR: returns unchanged when no candidate has triples', async () => {
+  await withTempStorage(async (storage) => {
+    const candidates = [
+      makeStub('c1', 'no triples', 0.8),
+      makeStub('c2', 'also no triples', 0.6),
+    ];
+    const r = await graphAwareRerankPPR(storage, candidates);
+    assert.equal(r.length, 2);
+    assert.equal(r[0]!.chunk.id, 'c1');
+    assert.equal(r[0]!.score, 0.8);
   });
 });

@@ -13,7 +13,7 @@ import {
 import { loadConfig } from './config.js';
 import { isLlmAvailable } from './llm.js';
 import { search, selectRelevant, formatRecalledMemories } from './search.js';
-import { graphAwareRerank } from './graph-rerank.js';
+import { graphAwareRerank, graphAwareRerankPPR } from './graph-rerank.js';
 import { extractFromConversation } from './extractor.js';
 import { consolidate } from './consolidator.js';
 import { extractRules, formatRulesForPrompt } from './procedural.js';
@@ -104,7 +104,7 @@ server.registerTool(
       tag: z.string().optional().describe('Filter by exact tag match. Consumer-defined (e.g. "cortex_type:action_item").'),
       cognitiveLoad: z.enum(['low', 'normal', 'high']).optional().describe('From Persona. "high" returns top 3 only.'),
       format: z.boolean().optional().describe('If true, returns formatted text grouped by cognitive layer instead of JSON.'),
-      graphRerank: z.boolean().optional().describe('If true, run results through 1-hop graph-aware reranking (HippoRAG-lite) — boosts chunks that are KG-connected to the top similarity matches. Helps multi-hop questions where the answer is one graph hop away.'),
+      graphRerank: z.union([z.boolean(), z.enum(['lite', 'ppr'])]).optional().describe('Graph-aware rerank mode. `false` or omitted = pure similarity ranking. `true` or `"lite"` = 1-hop expansion + score boost (HippoRAG-lite, fast, no convergence). `"ppr"` = full Personalized PageRank walk from query-seed entities (Gutiérrez et al, NeurIPS 2024 — more accurate on multi-hop QA at modest extra cost). PPR falls back to lite when the graph has < 4 entities or > 500 nodes.'),
     }),
   },
   async ({ query, maxResults, domain, topic, tag, cognitiveLoad, format: formatOutput, graphRerank }) => {
@@ -120,15 +120,17 @@ server.registerTool(
     } catch {
       selected = results.slice(0, cognitiveLoad === 'high' ? 3 : 5);
     }
-    // Optional 1-hop graph-aware rerank. When the caller knows their
-    // workload has multi-hop QA shape (LoCoMo-style "where does X
-    // live, and what's the weather like there"), this catches chunks
-    // that are KG-connected to the top similarity matches but didn't
-    // win on similarity alone. No-op on memory stores without graph
-    // data.
+    // Optional graph-aware rerank.
+    //   - lite (or `true`): 1-hop expansion + boost. Fast.
+    //   - ppr: full Personalized PageRank walk from seed entities.
+    //     Better on multi-hop QA but pays the iteration cost.
+    // Both no-op on memory stores without graph data.
     if (graphRerank) {
+      const mode = graphRerank === 'ppr' ? 'ppr' : 'lite';
       try {
-        selected = await graphAwareRerank(storage, selected);
+        selected = mode === 'ppr'
+          ? await graphAwareRerankPPR(storage, selected)
+          : await graphAwareRerank(storage, selected);
       } catch {
         // graph rerank is opportunistic — fall through to similarity-
         // only results on any error.

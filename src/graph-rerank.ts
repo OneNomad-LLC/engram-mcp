@@ -131,6 +131,173 @@ export async function graphAwareRerank(
 }
 
 /**
+ * Personalized PageRank rerank — full HippoRAG (Gutiérrez et al,
+ * NeurIPS 2024).
+ *
+ * Generalizes the 1-hop lite version above into a multi-iteration
+ * walk over the KG. Boosts chunks whose contributed entities are
+ * highly reachable from the query's seed entities, where
+ * "reachable" is measured by PPR convergence.
+ *
+ * Algorithm:
+ *   1. Build forward + reverse adjacency from KG triples (the graph
+ *      is undirected for retrieval purposes — both subject→object
+ *      and object→subject edges count).
+ *   2. Identify SEED entities from the top-K similarity candidates
+ *      (entities each candidate contributed). Mass distributed
+ *      uniformly across seeds.
+ *   3. Run damped random-walk iterations:
+ *        r_new = (1-α) * P * r + α * s
+ *      where P is the row-normalized transition matrix, s is the
+ *      seed vector, α is the teleport probability (0.15 — standard).
+ *   4. After convergence (or max iterations), score each candidate
+ *      chunk by Σ(PPR-weight of entities the chunk contributed).
+ *
+ * Caps:
+ *   - 50 iterations max (typical convergence in 10-20)
+ *   - 1e-4 L1-norm convergence threshold
+ *   - 500 entity graph cap (largest LoCoMo conversation produces
+ *     ~200-300 distinct entities; this caps pathological inputs)
+ *
+ * Falls back to the lite 1-hop version when:
+ *   - candidates is empty
+ *   - no candidate contributed any KG triples
+ *   - graph contains < 4 entities (not enough structure for PPR
+ *     to differentiate)
+ */
+const PPR_ALPHA = 0.15;           // Teleport probability (HippoRAG paper default)
+const PPR_MAX_ITERATIONS = 50;
+const PPR_CONVERGENCE_L1 = 1e-4;
+const PPR_MAX_GRAPH_NODES = 500;
+const PPR_BOOST_PER_UNIT = 1.0;   // Multiplied with normalized PPR mass; tuned conservative
+const PPR_MAX_BOOST = 0.5;
+
+export async function graphAwareRerankPPR(
+  storage: Storage,
+  candidates: SearchResult[],
+): Promise<SearchResult[]> {
+  if (candidates.length === 0) return candidates;
+  const expandable = candidates.slice(0, MAX_CANDIDATES_TO_EXPAND);
+
+  // Step 1+2: candidate → entities they contributed (same as lite).
+  const entitiesByCandidate = new Map<string, Set<string>>();
+  const seedEntities = new Set<string>();
+
+  for (const cand of expandable) {
+    const id = cand.chunk.id;
+    const triples = await storage.queryTriples({}).then((all) =>
+      all.filter((t) => t.source === id),
+    );
+    if (triples.length === 0) continue;
+    const entities = new Set<string>();
+    for (const t of triples) {
+      entities.add(t.subject.toLowerCase());
+      entities.add(t.object.toLowerCase());
+    }
+    const capped = Array.from(entities).slice(0, MAX_ENTITIES_PER_CANDIDATE);
+    entitiesByCandidate.set(id, new Set(capped));
+    for (const e of capped) seedEntities.add(e);
+  }
+
+  if (seedEntities.size < 4) {
+    // Not enough graph structure for PPR — fall back to lite.
+    return graphAwareRerank(storage, candidates);
+  }
+
+  // Step 3: build the FULL forward+reverse adjacency from the active
+  // KG — not just the seed entities' direct neighbors. PPR needs the
+  // graph it's walking on.
+  const allTriples = await storage.queryTriples({ activeOnly: true });
+  const adjacency = new Map<string, Set<string>>();
+  for (const t of allTriples) {
+    const subj = t.subject.toLowerCase();
+    const obj = t.object.toLowerCase();
+    if (!adjacency.has(subj)) adjacency.set(subj, new Set());
+    if (!adjacency.has(obj)) adjacency.set(obj, new Set());
+    adjacency.get(subj)!.add(obj);
+    adjacency.get(obj)!.add(subj);
+  }
+
+  if (adjacency.size > PPR_MAX_GRAPH_NODES) {
+    // Pathological graph — fall back to lite to avoid PPR over a
+    // huge sparse matrix.
+    return graphAwareRerank(storage, candidates);
+  }
+
+  // Step 4: initialize seed vector. Uniform over seed entities,
+  // zero elsewhere.
+  const nodes = Array.from(adjacency.keys());
+  const indexOf = new Map<string, number>();
+  for (let i = 0; i < nodes.length; i++) indexOf.set(nodes[i]!, i);
+
+  const seedVec = new Float64Array(nodes.length);
+  const seedWeight = 1 / seedEntities.size;
+  for (const seed of seedEntities) {
+    const idx = indexOf.get(seed);
+    if (idx !== undefined) seedVec[idx] = seedWeight;
+  }
+
+  // Initial rank = seed vector
+  let rank = Float64Array.from(seedVec);
+  const next = new Float64Array(nodes.length);
+
+  // Pre-compute out-degree for normalization (graph is undirected
+  // so out-degree = in-degree = neighbor count).
+  const outDegree = new Float64Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) {
+    outDegree[i] = adjacency.get(nodes[i]!)!.size;
+  }
+
+  // Step 5: iterate PPR until convergence or cap.
+  for (let iter = 0; iter < PPR_MAX_ITERATIONS; iter++) {
+    next.fill(0);
+    // Distribute current rank along edges
+    for (let i = 0; i < nodes.length; i++) {
+      if (rank[i] === 0 || outDegree[i] === 0) continue;
+      const share = rank[i]! / outDegree[i]!;
+      for (const neighbor of adjacency.get(nodes[i]!)!) {
+        const j = indexOf.get(neighbor);
+        if (j !== undefined) next[j]! += share;
+      }
+    }
+    // Apply damping + teleport
+    let l1Diff = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      const updated = (1 - PPR_ALPHA) * next[i]! + PPR_ALPHA * seedVec[i]!;
+      l1Diff += Math.abs(updated - rank[i]!);
+      rank[i] = updated;
+    }
+    if (l1Diff < PPR_CONVERGENCE_L1) break;
+  }
+
+  // Step 6: score each candidate chunk by sum of PPR weights over
+  // entities it contributed. Normalize by the max PPR weight in the
+  // graph so the boost is in [0, MAX_BOOST].
+  let maxRank = 0;
+  for (let i = 0; i < rank.length; i++) if (rank[i]! > maxRank) maxRank = rank[i]!;
+  if (maxRank === 0) return candidates;
+
+  const chunkPprScore = new Map<string, number>();
+  for (const cand of candidates) {
+    const own = entitiesByCandidate.get(cand.chunk.id) ?? new Set<string>();
+    let score = 0;
+    for (const ent of own) {
+      const idx = indexOf.get(ent);
+      if (idx !== undefined) score += rank[idx]! / maxRank;
+    }
+    if (score > 0) chunkPprScore.set(cand.chunk.id, score);
+  }
+
+  const boosted = candidates.map((cand) => {
+    const pprScore = chunkPprScore.get(cand.chunk.id) ?? 0;
+    const boost = Math.min(PPR_MAX_BOOST, PPR_BOOST_PER_UNIT * pprScore);
+    return { ...cand, score: cand.score + boost };
+  });
+  boosted.sort((a, b) => b.score - a.score);
+  return boosted;
+}
+
+/**
  * Telemetry helper — returns the boost that *would* be applied to
  * each candidate without actually re-ranking them. Useful for
  * debugging and for the LoCoMo bench's per-question diagnostics.
