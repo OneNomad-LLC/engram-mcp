@@ -64,6 +64,25 @@ export interface IngestEntry {
    * same hour), losing all temporal differentiation.
    */
   createdAt?: string;
+  /**
+   * When true, skip the per-chunk KG triple extraction. The standalone
+   * locomo bench bypasses this (calls saveChunk directly, never enters
+   * wal.ts), which is why its wall-clock is ~50× faster than Pyre's
+   * MCP-boundary bench on the same dataset.
+   *
+   * Real users keep KG extraction (it powers memory_dossier,
+   * memory_kg_query, graph rerank). Benchmark harnesses comparing
+   * apples-to-apples vs the standalone bench should pass this flag
+   * so they're measuring the same code path.
+   */
+  skipKgExtraction?: boolean;
+  /**
+   * When true, skip the post-batch appendDailyEntry write. Same
+   * rationale as skipKgExtraction — the standalone bench doesn't
+   * touch the daily-entries store; bench harnesses matching it
+   * should skip the write to compare on equal footing.
+   */
+  skipDailyEntry?: boolean;
 }
 
 /**
@@ -235,8 +254,16 @@ export async function ingest(
     }
   }
 
-  // Log to daily entries
-  if (chunks.length > 0) {
+  // Per-batch side effects. Both opt-out via flags on any entry in
+  // the batch (typical: memory_ingest calls ingest() with one entry,
+  // so a single flag controls the path). Benchmark harnesses set
+  // these to match what engram/benchmarks/locomo.ts does — its
+  // direct-saveChunk path skips both, which is the source of the
+  // ~50× wall-clock gap between standalone and MCP-boundary benches.
+  const skipDaily = entries.some(e => e.skipDailyEntry);
+  const skipKg = entries.some(e => e.skipKgExtraction);
+
+  if (chunks.length > 0 && !skipDaily) {
     const date = new Date().toISOString().split('T')[0];
     await storage.appendDailyEntry(date, {
       timestamp: new Date().toISOString(),
@@ -244,7 +271,9 @@ export async function ingest(
       summary: `WAL ingest: ${chunks.length} entries`,
       extractedFacts: chunks.map(c => c.content),
     });
+  }
 
+  if (chunks.length > 0 && !skipKg) {
     // Auto-populate knowledge graph from ingested content
     for (const chunk of chunks) {
       if (chunk.consolidationLevel === -1) continue; // skip parent containers
