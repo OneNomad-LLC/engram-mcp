@@ -46,6 +46,24 @@ export interface IngestEntry {
   emotionalArousal?: number;  // 0 to 1, from Persona bridge
   origin?: MemoryOrigin;      // 'user' = explicit ingest, 'derived'/'extracted'/'imported' = auto
   tier?: MemoryTier;          // Override default tier ('scratch' for session-only)
+  /**
+   * ISO 8601 timestamp override. Default: ingest time (Date.now()).
+   *
+   * Critical when the content represents an event that originally
+   * happened at a different time — meeting notes from yesterday,
+   * dated documents, imported chat history, benchmark fixtures.
+   *
+   * The createdAt timestamp flows into `buildContextPrefix()` which
+   * is included in the embedded text. The retrieval pipeline uses
+   * this as a temporal signal — both via similarity match against
+   * the prefix in queries, and via downstream temporal-boost logic
+   * in `search.ts`.
+   *
+   * Without an override, every ingested memory shares the ingest-
+   * time prefix (which is the same for everything ingested in the
+   * same hour), losing all temporal differentiation.
+   */
+  createdAt?: string;
 }
 
 /**
@@ -131,7 +149,9 @@ export async function ingest(
       source: entry.source ?? `wal:${Date.now()}`,
       importance: effectiveImportance,
       sentiment: entry.sentiment ?? 'neutral' as Sentiment,
-      createdAt: new Date().toISOString(),
+      // Honor caller-provided createdAt (for backfilled memories with
+      // a known original time) — defaults to "now" when omitted.
+      createdAt: entry.createdAt ?? new Date().toISOString(),
       lastRecalledAt: null,
       recallCount: 0,
       relatedMemories: [],
