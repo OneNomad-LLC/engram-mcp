@@ -83,6 +83,52 @@ export interface IngestEntry {
    * should skip the write to compare on equal footing.
    */
   skipDailyEntry?: boolean;
+  /**
+   * When false, KG extraction + daily-entry append run in the
+   * BACKGROUND after ingest() returns. The caller gets its chunks
+   * back as soon as the saveChunk loop finishes; the side effects
+   * complete on their own pace.
+   *
+   * Default true (backwards compatible — caller awaits everything).
+   * Production callers where the agent doesn't immediately query
+   * the just-written content (chat WAL, tool-vault bridge) should
+   * pass false for ~5-30× faster perceived ingest latency.
+   *
+   * To wait for background work to drain (tests, shutdown), call
+   * `flushPendingSideEffects()` from this module.
+   */
+  awaitSideEffects?: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Background side-effect tracking
+// ─────────────────────────────────────────────────────────────────────
+
+const pendingSideEffects = new Set<Promise<void>>();
+
+/**
+ * Wait for all in-flight background side-effects (KG extraction +
+ * daily-entry append fired with `awaitSideEffects: false`) to
+ * complete. No-op when nothing is pending.
+ *
+ * Tests should call this between ingest and assert; shutdown code
+ * should call before process exit to avoid losing KG writes.
+ */
+export async function flushPendingSideEffects(): Promise<void> {
+  // Snapshot — new promises added during await won't be drained by
+  // this call (they get the next one). Loop until empty in case of
+  // long-running chains.
+  let attempts = 0;
+  while (pendingSideEffects.size > 0 && attempts < 100) {
+    const snapshot = Array.from(pendingSideEffects);
+    await Promise.allSettled(snapshot);
+    attempts++;
+  }
+}
+
+/** Pending count — for tests + telemetry. */
+export function pendingSideEffectCount(): number {
+  return pendingSideEffects.size;
 }
 
 /**
@@ -262,30 +308,53 @@ export async function ingest(
   // ~50× wall-clock gap between standalone and MCP-boundary benches.
   const skipDaily = entries.some(e => e.skipDailyEntry);
   const skipKg = entries.some(e => e.skipKgExtraction);
+  // awaitSideEffects defaults TRUE — only flip to async when EVERY
+  // entry in the batch opts out, to avoid surprising a sync caller
+  // batched with an async one.
+  const runAsync = entries.length > 0 && entries.every(e => e.awaitSideEffects === false);
 
-  if (chunks.length > 0 && !skipDaily) {
-    const date = new Date().toISOString().split('T')[0];
-    await storage.appendDailyEntry(date, {
-      timestamp: new Date().toISOString(),
-      conversationId: chunks[0].source,
-      summary: `WAL ingest: ${chunks.length} entries`,
-      extractedFacts: chunks.map(c => c.content),
-    });
-  }
-
-  if (chunks.length > 0 && !skipKg) {
-    // Auto-populate knowledge graph from ingested content
-    for (const chunk of chunks) {
-      if (chunk.consolidationLevel === -1) continue; // skip parent containers
-      try {
-        await extractAndPersistTriples(storage, chunk.content, {
-          domain: chunk.domain,
-          topic: chunk.topic,
-          source: chunk.source,
-        });
-      } catch {
-        // KG extraction is best-effort — never block ingestion
+  if (chunks.length > 0) {
+    const sideEffectsTask = async (): Promise<void> => {
+      if (!skipDaily) {
+        const date = new Date().toISOString().split('T')[0];
+        try {
+          await storage.appendDailyEntry(date, {
+            timestamp: new Date().toISOString(),
+            conversationId: chunks[0].source,
+            summary: `WAL ingest: ${chunks.length} entries`,
+            extractedFacts: chunks.map(c => c.content),
+          });
+        } catch {
+          // best-effort: a daily-entry append failure must not break
+          // the rest of the side-effects task
+        }
       }
+      if (!skipKg) {
+        // Auto-populate knowledge graph from ingested content
+        for (const chunk of chunks) {
+          if (chunk.consolidationLevel === -1) continue; // skip parent containers
+          try {
+            await extractAndPersistTriples(storage, chunk.content, {
+              domain: chunk.domain,
+              topic: chunk.topic,
+              source: chunk.source,
+            });
+          } catch {
+            // KG extraction is best-effort — never block ingestion
+          }
+        }
+      }
+    };
+
+    if (runAsync) {
+      // Fire and forget — track in pendingSideEffects so tests or
+      // shutdown code can drain via flushPendingSideEffects().
+      const p = sideEffectsTask()
+        .catch(() => { /* already handled at the per-step catches */ })
+        .finally(() => { pendingSideEffects.delete(p); });
+      pendingSideEffects.add(p);
+    } else {
+      await sideEffectsTask();
     }
   }
 

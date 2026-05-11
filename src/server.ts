@@ -273,9 +273,10 @@ server.registerTool(
       createdAt: z.string().optional().describe('ISO 8601 timestamp override. Default: ingest time (now). Use this when ingesting memories that ORIGINALLY happened at a different time — meeting notes from yesterday, chat history from last week, dated documents from years ago. The timestamp flows into the contextual prefix embedded with the content, giving the retrieval pipeline a temporal signal it would otherwise lose. Critical for benchmarks (LoCoMo) and real workloads that backfill historical context (Cortex ingest of dated docs, importing chat history from Slack/Discord).'),
       skipKgExtraction: z.boolean().optional().describe('Skip the per-chunk knowledge-graph triple extraction. Production users should leave this off — KG extraction powers memory_dossier, memory_kg_query, and graph-aware reranking. Benchmark harnesses comparing apples-to-apples vs the standalone locomo bench (which bypasses wal.ts entirely) should set this to true so they measure the same code path.'),
       skipDailyEntry: z.boolean().optional().describe('Skip the post-batch daily-entry append. Production users should leave this off — daily entries power memory_diary_read and cross-session summaries. Benchmark harnesses set this true alongside skipKgExtraction to match the standalone bench setup.'),
+      awaitSideEffects: z.boolean().optional().describe('When false, KG extraction + daily-entry append run in the BACKGROUND after the chunks land on disk; memory_ingest returns ~5-30x faster. Default true (caller awaits everything). Right for production paths where the agent doesn\'t immediately query the just-written content (chat WAL, vault → Engram bridge). Sync mode (true) is right when the caller WILL query within the same turn — bench harnesses, test fixtures, multi-step extraction pipelines.'),
     }),
   },
-  async ({ content, type, importance, tags, source, domain, topic, sentiment, emotionalValence, emotionalArousal, skipDedupe, origin, tier, createdAt, skipKgExtraction, skipDailyEntry }) => {
+  async ({ content, type, importance, tags, source, domain, topic, sentiment, emotionalValence, emotionalArousal, skipDedupe, origin, tier, createdAt, skipKgExtraction, skipDailyEntry, awaitSideEffects }) => {
     const storage = await ensureStorage();
 
     // Auto duplicate check (replaces old memory_check_duplicate tool). Callers
@@ -311,6 +312,7 @@ server.registerTool(
       ...(createdAt ? { createdAt } : {}),
       ...(skipKgExtraction ? { skipKgExtraction: true } : {}),
       ...(skipDailyEntry ? { skipDailyEntry: true } : {}),
+      ...(awaitSideEffects === false ? { awaitSideEffects: false } : {}),
       tier,
     }]);
     return json({
