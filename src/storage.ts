@@ -133,27 +133,32 @@ export class Storage {
 
     // Scalar indices on the triples hot path. addTriple() does a
     // queryTriples({ subject, predicate, object, activeOnly }) on
-    // every ingested triple to dedupe / reinforce existing entries.
-    // Unindexed, that's a full table scan — observable as monotonic
-    // ingest-time growth across LoCoMo conversations in the
-    // memory-recall bench (conv-26 ingest 6s → conv-44 ingest 28min
-    // before the bench's per-call timeout). LanceDB's bitmap index
-    // is right for low-cardinality fields (predicate set is small;
-    // subject/object have moderate cardinality but skewed
-    // distribution). Idempotent: calling createScalarIndex on an
-    // already-indexed column is a no-op.
+    // every ingested triple. Unindexed, that's a full table scan —
+    // observable as monotonic ingest-time growth across LoCoMo
+    // conversations (conv-26: 6s → conv-44: 28min).
     //
-    // Best-effort: index creation can fail on very fresh tables or
-    // older LanceDB builds; we swallow + log so existing functionality
-    // is unchanged when the index isn't available.
-    for (const col of ['subject', 'predicate', 'object', 'valid_to']) {
+    // Correct LanceDB API (v0.27.x): pass an Index instance from
+    // the factory via the `config` option. BTREE works for moderate-
+    // cardinality string columns (subject/object); BITMAP is faster
+    // for low-cardinality (predicate, valid_to which is mostly the
+    // empty string for active triples).
+    //
+    // Idempotent — replace: false (default) makes a second call a
+    // no-op. Best-effort — any failure (LanceDB version mismatch,
+    // table not yet committed) is swallowed; queries still work via
+    // WHERE filter, just without index acceleration.
+    const indexes: Array<{ col: string; idx: lancedb.Index }> = [
+      { col: 'subject', idx: lancedb.Index.btree() },
+      { col: 'object', idx: lancedb.Index.btree() },
+      { col: 'predicate', idx: lancedb.Index.bitmap() },
+      { col: 'valid_to', idx: lancedb.Index.bitmap() },
+    ];
+    for (const { col, idx } of indexes) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (this.triples as any).createIndex(col, { config: { type: 'BTREE' } }).catch(() => {});
+        await this.triples.createIndex(col, { config: idx });
       } catch {
-        // LanceDB version may not support createIndex on string cols
-        // with this signature. Silent fallthrough; queries still work
-        // via WHERE, just without index acceleration.
+        // Index already exists, or column not indexable. Silent
+        // fallthrough — queries still work, just without acceleration.
       }
     }
   }
