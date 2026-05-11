@@ -114,5 +114,11 @@ export interface SmartMemoryConfig {
     embeddingDimensions: number;
     /** Split long content into focused sub-chunks at ingest time (default: true) */
     enableChunking: boolean;
+    /** Persist diagnostic retrieval traces under <dataDir>/traces (default: false).
+     *  When enabled, every search() call writes a JSON trace capturing the query,
+     *  per-stage candidate counts, final result IDs, and total latency. */
+    enableRetrievalTraces: boolean;
+    /** Days to keep retrieval traces before garbage collection (default: 7). */
+    retrievalTraceRetentionDays: number;
 }
 export declare const DEFAULT_CONFIG: SmartMemoryConfig;

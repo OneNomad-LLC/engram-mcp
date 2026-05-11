@@ -44,6 +44,13 @@ export function loadConfig(overrides) {
     config.enableCrossEncoderRerank = envBool('ENGRAM_ENABLE_CROSS_ENCODER_RERANK', 'SMART_MEMORY_ENABLE_CROSS_ENCODER_RERANK', config.enableCrossEncoderRerank);
     config.enableEpisodicConsolidation = envBool('ENGRAM_ENABLE_EPISODIC_CONSOLIDATION', 'SMART_MEMORY_ENABLE_EPISODIC_CONSOLIDATION', config.enableEpisodicConsolidation);
     config.enableChunking = envBool('ENGRAM_ENABLE_CHUNKING', 'SMART_MEMORY_ENABLE_CHUNKING', config.enableChunking);
+    config.enableRetrievalTraces = envBool('ENGRAM_ENABLE_RETRIEVAL_TRACES', 'SMART_MEMORY_ENABLE_RETRIEVAL_TRACES', config.enableRetrievalTraces);
+    const traceRetention = env('ENGRAM_TRACE_RETENTION_DAYS', 'SMART_MEMORY_TRACE_RETENTION_DAYS');
+    if (traceRetention) {
+        const n = parseInt(traceRetention, 10);
+        if (Number.isFinite(n) && n > 0)
+            config.retrievalTraceRetentionDays = n;
+    }
     const embeddingDim = env('ENGRAM_EMBEDDING_DIM', 'SMART_MEMORY_EMBEDDING_DIM');
     if (embeddingDim) {
         config.embeddingDimensions = parseInt(embeddingDim, 10);

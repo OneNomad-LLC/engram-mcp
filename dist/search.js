@@ -1,20 +1,35 @@
 import { embed, llmComplete } from './llm.js';
 import { estimateTokens } from './utils.js';
 import { rerank } from './reranker.js';
+import { createTrace, recordStage, endTrace, persistTrace, } from './retrieval-trace.js';
 /**
  * Hybrid memory search: native ANN vector search (LanceDB) + keyword
  * with IDF weighting + temporal/entity/phrase boosting + spreading activation.
  */
 export async function search(config, storage, query, maxResults, filters) {
     const limit = maxResults ?? config.maxRecallChunks;
+    // Diagnostic trace: created when traces are enabled, threaded through
+    // the pipeline so each stage records its candidate count, then
+    // persisted in finally{} regardless of return path. Disabled by
+    // default — when off, this is a single null-check per stage.
+    const trace = config.enableRetrievalTraces
+        ? createTrace(query, { filters, maxResults })
+        : null;
     const allChunks = await storage.listChunks({
         excludeTiers: ['archive'],
         domain: filters?.domain,
         topic: filters?.topic,
         tag: filters?.tag,
     });
-    if (allChunks.length === 0)
+    if (trace)
+        recordStage(trace, { corpusSize: allChunks.length });
+    if (allChunks.length === 0) {
+        if (trace) {
+            endTrace(trace, []);
+            void persistTrace({ dataDir: config.dataDir, retentionDays: config.retrievalTraceRetentionDays }, trace);
+        }
         return [];
+    }
     // When a hard filter (tag/domain/topic) is supplied, results must be
     // restricted to chunks that actually pass the filter — even if vector
     // similarity against the full store would surface other items higher.
@@ -46,14 +61,25 @@ export async function search(config, storage, query, maxResults, filters) {
     if (queryEmbedding && queryEmbedding.length > 0) {
         const vectorResults = await storage.vectorSearch(queryEmbedding, Math.min(limit * 5, 50), // Larger candidate pool
         "tier != 'archive' AND consolidation_level != -1");
+        let aboveFloor = 0;
+        let belowFloor = 0;
         for (const { chunk, distance } of vectorResults) {
             if (allowedIds && !allowedIds.has(chunk.id))
                 continue;
             const similarity = 1 - distance;
             if (similarity > 0.25) {
                 scored.set(chunk.id, { chunk, score: similarity });
+                aboveFloor++;
+            }
+            else {
+                belowFloor++;
             }
         }
+        if (trace)
+            recordStage(trace, {
+                vectorAboveFloor: aboveFloor,
+                vectorBelowFloor: belowFloor,
+            });
         // If a hard filter is present and vector search missed tag-matching
         // chunks (because they embedded far from the query), seed them in with
         // a floor score so they still rank over irrelevant vector hits.
@@ -86,6 +112,8 @@ export async function search(config, storage, query, maxResults, filters) {
             }
         }
     }
+    if (trace)
+        recordStage(trace, { keywordMatches: keywordScored.size });
     // ── Propagate parent keyword hits to sub-chunks ────────────────────
     // Parent chunks (consolidationLevel=-1) have no embedding but contain
     // all keywords. When a parent matches, give its sub-chunks the score.
@@ -361,6 +389,14 @@ export async function search(config, storage, query, maxResults, filters) {
                 }
             }
         })();
+    }
+    // Finalize the diagnostic trace: stamp final result count + IDs +
+    // duration, then persist asynchronously so trace IO never blocks the
+    // caller. Persistence failures are swallowed inside persistTrace().
+    if (trace) {
+        recordStage(trace, { finalCount: results.length });
+        endTrace(trace, results.map((r) => r.chunk.id));
+        void persistTrace({ dataDir: config.dataDir, retentionDays: config.retrievalTraceRetentionDays }, trace);
     }
     return results;
 }

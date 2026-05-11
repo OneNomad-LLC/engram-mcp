@@ -7,6 +7,7 @@ import { buildUpdateMetadataPatch, } from './update-metadata.js';
 import { loadConfig } from './config.js';
 import { isLlmAvailable } from './llm.js';
 import { search, selectRelevant, formatRecalledMemories } from './search.js';
+import { graphAwareRerank, graphAwareRerankPPR } from './graph-rerank.js';
 import { extractFromConversation } from './extractor.js';
 import { consolidate } from './consolidator.js';
 import { extractRules, formatRulesForPrompt } from './procedural.js';
@@ -21,6 +22,7 @@ import { runGovernanceCheck, detectContradictions } from './governance.js';
 import { syncBridge, loadBridgeFile } from './procedural-bridge.js';
 import { writeHandoff, readHandoff, listHandoffs } from './handoff.js';
 import { assessPressure } from './context-pressure.js';
+import { listRecentTraces, gcOldTraces } from './retrieval-trace.js';
 // ── Config & Storage ────────────────────────────────────────────────
 const config = loadConfig();
 let _storage = null;
@@ -36,7 +38,7 @@ async function ensureStorage() {
 function text(t) { return { content: [{ type: 'text', text: t }] }; }
 function json(data) { return text(JSON.stringify(data, null, 2)); }
 // ── MCP Server ──────────────────────────────────────────────────────
-const server = new McpServer({ name: 'engram', version: '2.2.0' }, {
+const server = new McpServer({ name: 'engram', version: '2.4.0' }, {
     instructions: [
         'Engram is your long-term memory.',
         '',
@@ -70,8 +72,9 @@ server.registerTool('memory_search', {
         tag: z.string().optional().describe('Filter by exact tag match. Consumer-defined (e.g. "cortex_type:action_item").'),
         cognitiveLoad: z.enum(['low', 'normal', 'high']).optional().describe('From Persona. "high" returns top 3 only.'),
         format: z.boolean().optional().describe('If true, returns formatted text grouped by cognitive layer instead of JSON.'),
+        graphRerank: z.union([z.boolean(), z.enum(['lite', 'ppr'])]).optional().describe('Graph-aware rerank mode. `false` or omitted = pure similarity ranking. `true` or `"lite"` = 1-hop expansion + score boost (HippoRAG-lite, fast, no convergence). `"ppr"` = full Personalized PageRank walk from query-seed entities (Gutiérrez et al, NeurIPS 2024 — more accurate on multi-hop QA at modest extra cost). PPR falls back to lite when the graph has < 4 entities or > 500 nodes.'),
     }),
-}, async ({ query, maxResults, domain, topic, tag, cognitiveLoad, format: formatOutput }) => {
+}, async ({ query, maxResults, domain, topic, tag, cognitiveLoad, format: formatOutput, graphRerank }) => {
     let effectiveMaxResults = maxResults;
     if (cognitiveLoad === 'high') {
         effectiveMaxResults = Math.min(effectiveMaxResults ?? 10, 3);
@@ -84,6 +87,23 @@ server.registerTool('memory_search', {
     }
     catch {
         selected = results.slice(0, cognitiveLoad === 'high' ? 3 : 5);
+    }
+    // Optional graph-aware rerank.
+    //   - lite (or `true`): 1-hop expansion + boost. Fast.
+    //   - ppr: full Personalized PageRank walk from seed entities.
+    //     Better on multi-hop QA but pays the iteration cost.
+    // Both no-op on memory stores without graph data.
+    if (graphRerank) {
+        const mode = graphRerank === 'ppr' ? 'ppr' : 'lite';
+        try {
+            selected = mode === 'ppr'
+                ? await graphAwareRerankPPR(storage, selected)
+                : await graphAwareRerank(storage, selected);
+        }
+        catch {
+            // graph rerank is opportunistic — fall through to similarity-
+            // only results on any error.
+        }
     }
     if (cognitiveLoad === 'high' && selected.length > 3) {
         selected = selected
@@ -100,6 +120,78 @@ server.registerTool('memory_search', {
         total: results.length,
         selected: selected.length,
         results: selected.map(r => ({
+            id: r.chunk.id,
+            content: r.chunk.content,
+            type: r.chunk.type,
+            layer: r.chunk.cognitiveLayer,
+            tier: r.chunk.tier,
+            domain: r.chunk.domain || undefined,
+            topic: r.chunk.topic || undefined,
+            tags: r.chunk.tags.length > 0 ? r.chunk.tags : undefined,
+            source: r.chunk.source || undefined,
+            createdAt: r.chunk.createdAt || undefined,
+            importance: r.chunk.importance,
+            score: Math.round(r.score * 1000) / 1000,
+        })),
+    });
+});
+server.registerTool('memory_budget', {
+    title: 'Search Memories Within a Token Budget',
+    description: [
+        'Like memory_search, but returns memories that fit within a TOKEN BUDGET instead of a count limit.',
+        'Greedy fill from highest-relevance memories: candidates ranked by score × importance, included until the next entry would exceed the budget.',
+        'Used by Pyre\'s Context Budget Engine: the persona/memories slot allocates N tokens, and Engram returns "the most useful subset that fits."',
+        'Returns the same memory shape as memory_search plus { budgetTokens, usedTokens, includedCount, candidateCount } so callers can see how the budget got spent.',
+    ].join(' '),
+    inputSchema: z.object({
+        query: z.string().describe('Natural language search query.'),
+        budgetTokens: z.number().min(50).max(50000).describe('Token budget for the returned set. Greedy fill stops before exceeding this. Recommended range: 200 (tight slot) to 5000 (generous).'),
+        candidateLimit: z.number().min(1).max(500).optional().describe('Max candidates to consider before budget filtering (default: 50). Larger candidate pool = better quality picks but slower search.'),
+        domain: z.string().optional().describe('Filter by domain/project.'),
+        topic: z.string().optional().describe('Filter by topic.'),
+        tag: z.string().optional().describe('Filter by exact tag match.'),
+        format: z.boolean().optional().describe('If true, returns formatted text grouped by cognitive layer instead of JSON.'),
+    }),
+}, async ({ query, budgetTokens, candidateLimit, domain, topic, tag, format: formatOutput }) => {
+    const storage = await ensureStorage();
+    const candidates = await search(config, storage, query, candidateLimit ?? 50, { domain, topic, tag });
+    // Greedy budget fill. Sort by relevance score × importance (the
+    // composite "useful here AND useful in general" signal). Token
+    // estimate is conservative: 4 chars/token for English-prose
+    // memory content + a 30-token wrapper overhead per entry for
+    // type/source/tags rendering. Slightly over-estimating beats
+    // under-estimating; the budget caller (Pyre's CBE) prefers a
+    // small remainder over a hard overflow.
+    const ranked = candidates
+        .map((r) => ({ r, weight: r.score * (r.chunk.importance + 0.1) }))
+        .sort((a, b) => b.weight - a.weight);
+    const selected = [];
+    let usedTokens = 0;
+    const WRAPPER_OVERHEAD = 30;
+    const CHARS_PER_TOKEN = 4;
+    for (const { r } of ranked) {
+        const contentTokens = Math.ceil(r.chunk.content.length / CHARS_PER_TOKEN);
+        const entryTokens = contentTokens + WRAPPER_OVERHEAD;
+        if (usedTokens + entryTokens > budgetTokens) {
+            // Hit the budget. The remaining candidates would push us over;
+            // greedy stop here. Could continue scanning for a smaller
+            // entry that still fits, but the marginal token win usually
+            // isn't worth losing the strict importance ordering.
+            continue;
+        }
+        selected.push(r);
+        usedTokens += entryTokens;
+    }
+    if (formatOutput) {
+        const memText = formatRecalledMemories(selected);
+        return text(memText || 'No relevant memories found within budget.');
+    }
+    return json({
+        budgetTokens,
+        usedTokens,
+        includedCount: selected.length,
+        candidateCount: candidates.length,
+        results: selected.map((r) => ({
             id: r.chunk.id,
             content: r.chunk.content,
             type: r.chunk.type,
@@ -132,8 +224,12 @@ server.registerTool('memory_ingest', {
         skipDedupe: z.boolean().optional().describe('If true, bypass the 0.75-similarity duplicate check. Use when the caller is writing structured refinements of prior memories (e.g. action items derived from a meeting note) and dedupe would swallow the write.'),
         origin: z.enum(['user', 'derived', 'extracted', 'imported']).optional().describe('Provenance. Default "user" — explicit ingest is treated as user-asserted and protected from auto-merge / archive. Set "derived" when the caller is a downstream pipeline writing inferences.'),
         tier: z.enum(['scratch', 'short-term']).optional().describe('Memory tier. "scratch" = session-only, never promoted by consolidation, auto-purged after 24h. Use for exploratory notes you may want to discard. Default short-term.'),
+        createdAt: z.string().optional().describe('ISO 8601 timestamp override. Default: ingest time (now). Use this when ingesting memories that ORIGINALLY happened at a different time — meeting notes from yesterday, chat history from last week, dated documents from years ago. The timestamp flows into the contextual prefix embedded with the content, giving the retrieval pipeline a temporal signal it would otherwise lose. Critical for benchmarks (LoCoMo) and real workloads that backfill historical context (Cortex ingest of dated docs, importing chat history from Slack/Discord).'),
+        skipKgExtraction: z.boolean().optional().describe('Skip the per-chunk knowledge-graph triple extraction. Production users should leave this off — KG extraction powers memory_dossier, memory_kg_query, and graph-aware reranking. Benchmark harnesses comparing apples-to-apples vs the standalone locomo bench (which bypasses wal.ts entirely) should set this to true so they measure the same code path.'),
+        skipDailyEntry: z.boolean().optional().describe('Skip the post-batch daily-entry append. Production users should leave this off — daily entries power memory_diary_read and cross-session summaries. Benchmark harnesses set this true alongside skipKgExtraction to match the standalone bench setup.'),
+        awaitSideEffects: z.boolean().optional().describe('When false, KG extraction + daily-entry append run in the BACKGROUND after the chunks land on disk; memory_ingest returns ~5-30x faster. Default true (caller awaits everything). Right for production paths where the agent doesn\'t immediately query the just-written content (chat WAL, vault → Engram bridge). Sync mode (true) is right when the caller WILL query within the same turn — bench harnesses, test fixtures, multi-step extraction pipelines.'),
     }),
-}, async ({ content, type, importance, tags, source, domain, topic, sentiment, emotionalValence, emotionalArousal, skipDedupe, origin, tier }) => {
+}, async ({ content, type, importance, tags, source, domain, topic, sentiment, emotionalValence, emotionalArousal, skipDedupe, origin, tier, createdAt, skipKgExtraction, skipDailyEntry, awaitSideEffects }) => {
     const storage = await ensureStorage();
     // Auto duplicate check (replaces old memory_check_duplicate tool). Callers
     // writing intentional refinements can bypass via skipDedupe=true.
@@ -164,6 +260,10 @@ server.registerTool('memory_ingest', {
             emotionalValence,
             emotionalArousal,
             origin: origin ?? 'user',
+            ...(createdAt ? { createdAt } : {}),
+            ...(skipKgExtraction ? { skipKgExtraction: true } : {}),
+            ...(skipDailyEntry ? { skipDailyEntry: true } : {}),
+            ...(awaitSideEffects === false ? { awaitSideEffects: false } : {}),
             tier,
         }]);
     return json({
@@ -529,6 +629,146 @@ server.registerTool('memory_kg_timeline', {
         })),
     });
 });
+server.registerTool('memory_dossier', {
+    title: 'Entity Dossier',
+    description: [
+        'Aggregate everything Engram knows about an entity (person, project, concept) into a structured snapshot.',
+        'Pulls from FOUR sources: (1) KG triples where the entity is subject — definitive facts about the entity; (2) KG triples where the entity is object — facts where others reference the entity (e.g. "Alice reports-to Matt" appears in Matt\'s dossier as referencedBy); (3) memory chunks mentioning the entity in content/tags/topic — preferences, decisions, context; (4) recent activity ordered by createdAt — what came up lately.',
+        'Output is grouped by category (facts, preferences, decisions, corrections, recent) so the consumer doesn\'t have to bucket the chunks themselves.',
+        'Honors an optional budgetTokens cap; greedy fill within each category when set. Used by Pyre\'s Context Budget Engine to populate "what we know about <X>" slots without spending the entire memories budget on a search-by-relevance grab bag.',
+    ].join(' '),
+    inputSchema: z.object({
+        entity: z.string().describe('Entity name. Matches against KG subject, chunk content (substring), tags (exact), and topic (exact). Case-insensitive.'),
+        budgetTokens: z.number().min(100).max(50000).optional().describe('Optional token cap for the returned set. When set, each category fills greedy by importance until the per-category share is exhausted (~25% of budget per category). Without budget, returns up to maxPerCategory entries per category.'),
+        maxPerCategory: z.number().min(1).max(50).optional().describe('Max entries per category when budgetTokens is omitted (default: 5).'),
+        domain: z.string().optional().describe('Optional domain filter (limits dossier to a single project/scope).'),
+    }),
+}, async ({ entity, budgetTokens, maxPerCategory, domain }) => {
+    const storage = await ensureStorage();
+    const cap = maxPerCategory ?? 5;
+    const entityLower = entity.toLowerCase();
+    // 1a. KG triples where the entity is the subject (active facts).
+    //     Filtered to active by default — invalidated triples shouldn't
+    //     surface in a dossier.
+    const triples = await queryGraph(storage, {
+        subject: entity,
+        activeOnly: true,
+    });
+    // 1b. KG triples where the entity is the OBJECT — facts about the
+    //     entity asserted from someone else's perspective (e.g.
+    //     "Alice reports-to Matt" should appear in Matt's dossier as
+    //     a referencedBy edge). Without this, the dossier only shows
+    //     outbound relationships and misses inbound ones.
+    const referencedBy = await queryGraph(storage, {
+        object: entity,
+        activeOnly: true,
+    });
+    // 2. Memory chunks mentioning the entity. Use a generous candidate
+    //    pool (entity-shaped queries are usually narrower than free-form
+    //    search), then filter client-side for the substring/tag/topic
+    //    match so we don't miss chunks the search ranker buried.
+    const candidates = await search(config, storage, entity, 100, { domain });
+    const matching = candidates.filter((r) => {
+        const c = r.chunk;
+        return c.content.toLowerCase().includes(entityLower)
+            || c.tags.some((t) => t.toLowerCase() === entityLower)
+            || c.topic.toLowerCase() === entityLower;
+    });
+    // Bucket by type. "context" maps into recent rather than its own
+    // category since context is usually time-sensitive — last week's
+    // context is less interesting than last week's preference.
+    const buckets = {
+        facts: [],
+        preferences: [],
+        decisions: [],
+        corrections: [],
+        recent: [],
+    };
+    for (const r of matching) {
+        const t = r.chunk.type;
+        if (t === 'fact')
+            buckets.facts.push(r);
+        else if (t === 'preference')
+            buckets.preferences.push(r);
+        else if (t === 'decision')
+            buckets.decisions.push(r);
+        else if (t === 'correction')
+            buckets.corrections.push(r);
+        // context is intentionally not its own bucket — falls into recent
+    }
+    // Recent = top-N most recently created chunks across ALL types,
+    // independent of category. Catches active context + new
+    // facts/preferences regardless of where they bucketed.
+    buckets.recent = [...matching]
+        .sort((a, b) => (b.chunk.createdAt ?? '').localeCompare(a.chunk.createdAt ?? ''))
+        .slice(0, cap);
+    // Per-category importance sort + cap.
+    for (const k of Object.keys(buckets)) {
+        if (k === 'recent')
+            continue;
+        buckets[k] = buckets[k]
+            .sort((a, b) => b.chunk.importance - a.chunk.importance)
+            .slice(0, cap);
+    }
+    // Optional token-budget enforcement. Splits budget evenly across
+    // the 5 categories (facts / preferences / decisions / corrections
+    // / recent) and greedy-fills each within its share. Same 4
+    // chars/token + 30 wrapper estimate as memory_budget.
+    let usedTokens = 0;
+    if (typeof budgetTokens === 'number' && budgetTokens > 0) {
+        const perCategoryBudget = Math.floor(budgetTokens / 5);
+        const CHARS_PER_TOKEN = 4;
+        const WRAPPER_OVERHEAD = 30;
+        for (const k of Object.keys(buckets)) {
+            let categoryUsed = 0;
+            const filtered = [];
+            for (const r of buckets[k]) {
+                const t = Math.ceil(r.chunk.content.length / CHARS_PER_TOKEN) + WRAPPER_OVERHEAD;
+                if (categoryUsed + t > perCategoryBudget)
+                    continue;
+                filtered.push(r);
+                categoryUsed += t;
+                usedTokens += t;
+            }
+            buckets[k] = filtered;
+        }
+    }
+    const renderBucket = (entries) => entries.map((r) => ({
+        id: r.chunk.id,
+        content: r.chunk.content,
+        type: r.chunk.type,
+        importance: r.chunk.importance,
+        createdAt: r.chunk.createdAt || undefined,
+        domain: r.chunk.domain || undefined,
+        topic: r.chunk.topic || undefined,
+        tags: r.chunk.tags.length > 0 ? r.chunk.tags : undefined,
+    }));
+    return json({
+        entity,
+        budgetTokens: budgetTokens ?? null,
+        usedTokens: budgetTokens ? usedTokens : undefined,
+        kgFacts: triples.map((t) => ({
+            id: t.id,
+            predicate: t.predicate,
+            object: t.object,
+            confidence: t.confidence,
+            validFrom: t.validFrom,
+        })),
+        referencedBy: referencedBy.map((t) => ({
+            id: t.id,
+            subject: t.subject,
+            predicate: t.predicate,
+            confidence: t.confidence,
+            validFrom: t.validFrom,
+        })),
+        facts: renderBucket(buckets.facts),
+        preferences: renderBucket(buckets.preferences),
+        decisions: renderBucket(buckets.decisions),
+        corrections: renderBucket(buckets.corrections),
+        recent: renderBucket(buckets.recent),
+        candidateCount: matching.length,
+    });
+});
 // ─────────────────────────────────────────────────────────────────────
 // DIARY TOOLS
 // ─────────────────────────────────────────────────────────────────────
@@ -622,6 +862,35 @@ server.registerTool('memory_context_pressure', {
     return json(assessPressure(level, reason ?? '', phaseBoundary ?? false));
 });
 // ─────────────────────────────────────────────────────────────────────
+// DIAGNOSTIC RETRIEVAL TRACES
+// ─────────────────────────────────────────────────────────────────────
+server.registerTool('memory_trace_recent', {
+    title: 'Recent Retrieval Traces',
+    description: [
+        'List the most recent diagnostic retrieval traces. Each trace captures: query text, filters, per-stage candidate counts (corpus → vector above/below floor → keyword → final), result IDs, and total latency.',
+        'Use this when investigating "why didn\'t you find the obvious doc" complaints — the trace shows whether the result was retrieved at all, whether it survived the floor, and which stage dropped it.',
+        'Traces only persist when ENGRAM_ENABLE_RETRIEVAL_TRACES=true (default off). Returns an empty list when traces are disabled or no searches have run.',
+    ].join(' '),
+    inputSchema: z.object({
+        limit: z.number().min(1).max(200).optional().describe('Max traces to return (default: 25, max: 200).'),
+    }),
+}, async ({ limit }) => {
+    if (!config.enableRetrievalTraces) {
+        return json({
+            enabled: false,
+            traces: [],
+            note: 'Retrieval traces are disabled. Enable with ENGRAM_ENABLE_RETRIEVAL_TRACES=true (then restart Engram).',
+        });
+    }
+    const traces = await listRecentTraces({ dataDir: config.dataDir, retentionDays: config.retrievalTraceRetentionDays }, limit ?? 25);
+    return json({
+        enabled: true,
+        retentionDays: config.retrievalTraceRetentionDays,
+        count: traces.length,
+        traces,
+    });
+});
+// ─────────────────────────────────────────────────────────────────────
 // IMPORT
 // ─────────────────────────────────────────────────────────────────────
 server.registerTool('memory_import', {
@@ -645,6 +914,12 @@ async function main() {
     console.error(`LLM: ${isLlmAvailable() ? 'enabled' : 'disabled (heuristic mode)'}`);
     console.error(`Embeddings: local (${process.env.ENGRAM_EMBEDDING_MODEL ?? process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2'})`);
     console.error(`Mem0: ${config.mem0ApiKey ? 'enabled' : 'disabled'}`);
+    console.error(`Retrieval traces: ${config.enableRetrievalTraces ? `enabled (${config.retrievalTraceRetentionDays}d retention)` : 'disabled'}`);
+    // Best-effort trace GC on startup. Drops day-directories older than
+    // retentionDays. Cheap when the feature is off (no traces dir to scan).
+    if (config.enableRetrievalTraces) {
+        void gcOldTraces({ dataDir: config.dataDir, retentionDays: config.retrievalTraceRetentionDays });
+    }
 }
 main().catch(err => {
     console.error('Fatal error:', err);

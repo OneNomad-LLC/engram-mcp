@@ -20,5 +20,7 @@ export const DEFAULT_CONFIG = {
     enableEpisodicConsolidation: true,
     embeddingDimensions: 384,
     enableChunking: true,
+    enableRetrievalTraces: false,
+    retrievalTraceRetentionDays: 7,
 };
 //# sourceMappingURL=types.js.map

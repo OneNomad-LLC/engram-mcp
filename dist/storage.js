@@ -111,6 +111,37 @@ export class Storage {
                 }]);
             await this.triples.delete('id = \'__init__\'');
         }
+        // Scalar indices on the triples hot path. addTriple() does a
+        // queryTriples({ subject, predicate, object, activeOnly }) on
+        // every ingested triple. Unindexed, that's a full table scan —
+        // observable as monotonic ingest-time growth across LoCoMo
+        // conversations (conv-26: 6s → conv-44: 28min).
+        //
+        // Correct LanceDB API (v0.27.x): pass an Index instance from
+        // the factory via the `config` option. BTREE works for moderate-
+        // cardinality string columns (subject/object); BITMAP is faster
+        // for low-cardinality (predicate, valid_to which is mostly the
+        // empty string for active triples).
+        //
+        // Idempotent — replace: false (default) makes a second call a
+        // no-op. Best-effort — any failure (LanceDB version mismatch,
+        // table not yet committed) is swallowed; queries still work via
+        // WHERE filter, just without index acceleration.
+        const indexes = [
+            { col: 'subject', idx: lancedb.Index.btree() },
+            { col: 'object', idx: lancedb.Index.btree() },
+            { col: 'predicate', idx: lancedb.Index.bitmap() },
+            { col: 'valid_to', idx: lancedb.Index.bitmap() },
+        ];
+        for (const { col, idx } of indexes) {
+            try {
+                await this.triples.createIndex(col, { config: idx });
+            }
+            catch {
+                // Index already exists, or column not indexable. Silent
+                // fallthrough — queries still work, just without acceleration.
+            }
+        }
     }
     async ensureReady() {
         await this.ready;

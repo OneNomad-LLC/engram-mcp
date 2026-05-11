@@ -3,6 +3,7 @@ import { embed } from './llm.js';
 import { buildContextPrefix } from './utils.js';
 import { chunkContent } from './chunker.js';
 import { extractAndPersistTriples } from './kg-extractor.js';
+import { sourceDedup } from './source-dedup.js';
 // Lightweight poisoning patterns checked at ingest time (no LLM, no search)
 const POISON_PATTERNS = [
     /\b(ignore previous instructions|ignore all instructions|disregard|forget everything)\b/i,
@@ -15,6 +16,33 @@ function checkContentPoisoning(content) {
             return 'Suspicious content pattern detected — flagged for review';
     }
     return null;
+}
+// ─────────────────────────────────────────────────────────────────────
+// Background side-effect tracking
+// ─────────────────────────────────────────────────────────────────────
+const pendingSideEffects = new Set();
+/**
+ * Wait for all in-flight background side-effects (KG extraction +
+ * daily-entry append fired with `awaitSideEffects: false`) to
+ * complete. No-op when nothing is pending.
+ *
+ * Tests should call this between ingest and assert; shutdown code
+ * should call before process exit to avoid losing KG writes.
+ */
+export async function flushPendingSideEffects() {
+    // Snapshot — new promises added during await won't be drained by
+    // this call (they get the next one). Loop until empty in case of
+    // long-running chains.
+    let attempts = 0;
+    while (pendingSideEffects.size > 0 && attempts < 100) {
+        const snapshot = Array.from(pendingSideEffects);
+        await Promise.allSettled(snapshot);
+        attempts++;
+    }
+}
+/** Pending count — for tests + telemetry. */
+export function pendingSideEffectCount() {
+    return pendingSideEffects.size;
 }
 /**
  * Immediately persist one or more memory entries.
@@ -30,6 +58,43 @@ export async function ingest(config, storage, entries) {
         const poisonFlag = checkContentPoisoning(trimmedContent);
         if (poisonFlag) {
             console.error(`Engram governance: ${poisonFlag} in "${trimmedContent.slice(0, 80)}..."`);
+        }
+        // Same-source ingest dedup. When the agent re-reads a stable file
+        // or re-polls an unchanged endpoint within the same Engram process,
+        // we've already chunked + embedded + saved this content. Look up
+        // the (source, content-hash) pair in the in-memory cache and short-
+        // circuit the rest of the pipeline on a hit. Reuses the prior
+        // chunk(s) rather than writing duplicates.
+        //
+        // Bounded session-scoped cache (max 64 sources × 8 hashes); see
+        // source-dedup.ts. Persistence layer doesn't change.
+        const cached = sourceDedup.lookup(entry.source, trimmedContent);
+        if (cached) {
+            // Materialize a chunk reference for the caller from the cached
+            // metadata. We don't re-fetch the actual StoredChunk from disk —
+            // the caller's response only needs id + content + minimal meta,
+            // and the agent's history is keyed off `id`.
+            const stub = {
+                id: cached.chunkId,
+                tier: entry.tier ?? 'short-term',
+                type: entry.type ?? 'context',
+                cognitiveLayer: entry.layer ?? 'episodic',
+                tags: entry.tags ?? [],
+                domain: entry.domain ?? '',
+                topic: entry.topic ?? '',
+                source: entry.source ?? '',
+                importance: entry.importance ?? 0.5,
+                sentiment: entry.sentiment ?? 'neutral',
+                createdAt: new Date().toISOString(),
+                lastRecalledAt: null,
+                recallCount: 0,
+                relatedMemories: [],
+                recallOutcomes: [],
+                origin: entry.origin ?? 'derived',
+                content: trimmedContent,
+            };
+            chunks.push(stub);
+            continue;
         }
         const baseType = entry.type ?? inferType(trimmedContent);
         const baseLayer = entry.layer ?? inferLayer(trimmedContent);
@@ -53,7 +118,9 @@ export async function ingest(config, storage, entries) {
             source: entry.source ?? `wal:${Date.now()}`,
             importance: effectiveImportance,
             sentiment: entry.sentiment ?? 'neutral',
-            createdAt: new Date().toISOString(),
+            // Honor caller-provided createdAt (for backfilled memories with
+            // a known original time) — defaults to "now" when omitted.
+            createdAt: entry.createdAt ?? new Date().toISOString(),
             lastRecalledAt: null,
             recallCount: 0,
             relatedMemories: [],
@@ -72,6 +139,10 @@ export async function ingest(config, storage, entries) {
             };
             await storage.saveChunk(parentChunk);
             chunks.push(parentChunk);
+            // Remember the parent chunk id keyed by source so a re-ingest
+            // of the identical content within the same process returns this
+            // same id and skips chunk+embed+save entirely.
+            sourceDedup.remember(entry.source, trimmedContent, parentChunk.id);
             // Save sub-chunks with embeddings
             for (const subContent of splitResult.chunks) {
                 const subChunk = {
@@ -126,31 +197,67 @@ export async function ingest(config, storage, entries) {
             catch { /* skip */ }
             await storage.saveChunk(chunk);
             chunks.push(chunk);
+            // Single-chunk path: cache the chunk id keyed by source.
+            sourceDedup.remember(entry.source, trimmedContent, chunk.id);
         }
     }
-    // Log to daily entries
+    // Per-batch side effects. Both opt-out via flags on any entry in
+    // the batch (typical: memory_ingest calls ingest() with one entry,
+    // so a single flag controls the path). Benchmark harnesses set
+    // these to match what engram/benchmarks/locomo.ts does — its
+    // direct-saveChunk path skips both, which is the source of the
+    // ~50× wall-clock gap between standalone and MCP-boundary benches.
+    const skipDaily = entries.some(e => e.skipDailyEntry);
+    const skipKg = entries.some(e => e.skipKgExtraction);
+    // awaitSideEffects defaults TRUE — only flip to async when EVERY
+    // entry in the batch opts out, to avoid surprising a sync caller
+    // batched with an async one.
+    const runAsync = entries.length > 0 && entries.every(e => e.awaitSideEffects === false);
     if (chunks.length > 0) {
-        const date = new Date().toISOString().split('T')[0];
-        await storage.appendDailyEntry(date, {
-            timestamp: new Date().toISOString(),
-            conversationId: chunks[0].source,
-            summary: `WAL ingest: ${chunks.length} entries`,
-            extractedFacts: chunks.map(c => c.content),
-        });
-        // Auto-populate knowledge graph from ingested content
-        for (const chunk of chunks) {
-            if (chunk.consolidationLevel === -1)
-                continue; // skip parent containers
-            try {
-                await extractAndPersistTriples(storage, chunk.content, {
-                    domain: chunk.domain,
-                    topic: chunk.topic,
-                    source: chunk.source,
-                });
+        const sideEffectsTask = async () => {
+            if (!skipDaily) {
+                const date = new Date().toISOString().split('T')[0];
+                try {
+                    await storage.appendDailyEntry(date, {
+                        timestamp: new Date().toISOString(),
+                        conversationId: chunks[0].source,
+                        summary: `WAL ingest: ${chunks.length} entries`,
+                        extractedFacts: chunks.map(c => c.content),
+                    });
+                }
+                catch {
+                    // best-effort: a daily-entry append failure must not break
+                    // the rest of the side-effects task
+                }
             }
-            catch {
-                // KG extraction is best-effort — never block ingestion
+            if (!skipKg) {
+                // Auto-populate knowledge graph from ingested content
+                for (const chunk of chunks) {
+                    if (chunk.consolidationLevel === -1)
+                        continue; // skip parent containers
+                    try {
+                        await extractAndPersistTriples(storage, chunk.content, {
+                            domain: chunk.domain,
+                            topic: chunk.topic,
+                            source: chunk.source,
+                        });
+                    }
+                    catch {
+                        // KG extraction is best-effort — never block ingestion
+                    }
+                }
             }
+        };
+        if (runAsync) {
+            // Fire and forget — track in pendingSideEffects so tests or
+            // shutdown code can drain via flushPendingSideEffects().
+            const p = sideEffectsTask()
+                .catch(() => { })
+                .finally(() => { pendingSideEffects.delete(p); });
+            pendingSideEffects.add(p);
+        }
+        else {
+            await sideEffectsTask();
         }
     }
     return chunks;
