@@ -93,6 +93,53 @@ interface ModeResult {
   rssMb: number;
 }
 
+/**
+ * Print a single-line progress update to stderr (uses CR so the line
+ * rewrites itself in TTYs).  When stderr isn't a TTY (CI logs, piped
+ * to file), prints with newline so the log stays readable.
+ *
+ * Throttled to once per ~1 second so a fast inner loop doesn't drown
+ * out other output.
+ */
+function makeProgressReporter(label: string, total: number) {
+  const isTty = process.stderr.isTTY;
+  const startedAt = performance.now();
+  let lastEmitAt = 0;
+
+  const fmtDuration = (ms: number): string => {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return m > 0 ? `${m}m${String(rem).padStart(2, '0')}s` : `${rem}s`;
+  };
+
+  return {
+    tick(done: number, force = false) {
+      const now = performance.now();
+      if (!force && now - lastEmitAt < 1000) return;
+      lastEmitAt = now;
+      const elapsed = now - startedAt;
+      const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+      const rate = elapsed > 0 ? (done / (elapsed / 1000)) : 0;
+      const remaining = rate > 0 ? ((total - done) / rate) * 1000 : 0;
+      const line =
+        `[${label}] ${done}/${total} ` +
+        `(${pct.toFixed(1)}%)  ` +
+        `${fmtDuration(elapsed)} elapsed  ` +
+        `${rate.toFixed(0)} chunks/s  ` +
+        `ETA ${fmtDuration(remaining)}`;
+      if (isTty) {
+        process.stderr.write(`\r${line.padEnd(80)}`);
+      } else {
+        process.stderr.write(`${line}\n`);
+      }
+    },
+    finish() {
+      if (isTty) process.stderr.write('\n');
+    },
+  };
+}
+
 async function runMode(mode: 'cold' | 'warm', chunkCount: number, batchSize: number): Promise<ModeResult> {
   const dir = join(tmpdir(), `engram-throughput-${mode}-${Date.now()}`);
   mkdirSync(dir, { recursive: true });
@@ -108,6 +155,7 @@ async function runMode(mode: 'cold' | 'warm', chunkCount: number, batchSize: num
   // Warm path also preloads N chunks before the timed run.
   if (mode === 'warm') {
     console.error(`Pre-seeding ${chunkCount} chunks for warm mode...`);
+    const seedProgress = makeProgressReporter(`${mode} preseed`, chunkCount);
     for (let i = 0; i < chunkCount; i += batchSize) {
       const batch = [];
       for (let j = 0; j < batchSize && i + j < chunkCount; j++) {
@@ -119,7 +167,10 @@ async function runMode(mode: 'cold' | 'warm', chunkCount: number, batchSize: num
         });
       }
       await ingest(config, storage, batch);
+      seedProgress.tick(Math.min(i + batchSize, chunkCount));
     }
+    seedProgress.tick(chunkCount, true);
+    seedProgress.finish();
     await flushPendingSideEffects();
   }
 
@@ -134,6 +185,7 @@ async function runMode(mode: 'cold' | 'warm', chunkCount: number, batchSize: num
 
   console.error(`[${mode}] Timing ${chunkCount} ingests (batch=${batchSize})...`);
   const startWall = performance.now();
+  const progress = makeProgressReporter(`${mode} timing`, chunkCount);
 
   for (let i = 0; i < chunkCount; i += batchSize) {
     const batch = [];
@@ -146,7 +198,10 @@ async function runMode(mode: 'cold' | 'warm', chunkCount: number, batchSize: num
       });
     }
     await ingest(config, storage, batch);
+    progress.tick(Math.min(i + batchSize, chunkCount));
   }
+  progress.tick(chunkCount, true);
+  progress.finish();
   // Drain background work before stopping the clock — chunks/sec
   // should reflect "fully persisted" not "queued."
   await flushPendingSideEffects();

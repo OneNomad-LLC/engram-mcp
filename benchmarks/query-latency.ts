@@ -101,6 +101,46 @@ const LONG_QUERIES = [
   'I need a full timeline of changes to the bridge config, including reviewer notes, related CLI flag updates, downstream impact on the consolidator, and any rollbacks or follow-up work in the test fixtures or documentation.',
 ];
 
+/**
+ * Single-line progress reporter for the long-running seed + query
+ * loops. Uses CR to overwrite the same line in a TTY; falls back to
+ * newline output when stderr is piped (CI logs). Throttled to once
+ * per ~1 second.
+ */
+function makeLatencyProgress(label: string, total: number) {
+  const isTty = process.stderr.isTTY;
+  const startedAt = performance.now();
+  let lastEmitAt = 0;
+  const fmtDuration = (ms: number): string => {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return m > 0 ? `${m}m${String(rem).padStart(2, '0')}s` : `${rem}s`;
+  };
+  return {
+    tick(done: number, force = false) {
+      const now = performance.now();
+      if (!force && now - lastEmitAt < 1000) return;
+      lastEmitAt = now;
+      const elapsed = now - startedAt;
+      const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+      const rate = elapsed > 0 ? (done / (elapsed / 1000)) : 0;
+      const remaining = rate > 0 ? ((total - done) / rate) * 1000 : 0;
+      const line =
+        `[${label}] ${done}/${total} ` +
+        `(${pct.toFixed(1)}%)  ` +
+        `${fmtDuration(elapsed)} elapsed  ` +
+        `${rate.toFixed(1)}/s  ` +
+        `ETA ${fmtDuration(remaining)}`;
+      if (isTty) process.stderr.write(`\r${line.padEnd(80)}`);
+      else process.stderr.write(`${line}\n`);
+    },
+    finish() {
+      if (isTty) process.stderr.write('\n');
+    },
+  };
+}
+
 const BUCKETS: Array<{ name: 'short' | 'medium' | 'long'; queries: string[] }> = [
   { name: 'short', queries: SHORT_QUERIES },
   { name: 'medium', queries: MEDIUM_QUERIES },
@@ -129,6 +169,7 @@ async function main(): Promise<void> {
   console.error(`Seeding ${args.chunks} chunks...`);
   const seedStart = performance.now();
   const batchSize = 50;
+  const seedProgress = makeLatencyProgress('seed', args.chunks);
   for (let i = 0; i < args.chunks; i += batchSize) {
     const batch = [];
     for (let j = 0; j < batchSize && i + j < args.chunks; j++) {
@@ -140,7 +181,10 @@ async function main(): Promise<void> {
       });
     }
     await ingest(config, storage, batch);
+    seedProgress.tick(Math.min(i + batchSize, args.chunks));
   }
+  seedProgress.tick(args.chunks, true);
+  seedProgress.finish();
   await flushPendingSideEffects();
   console.error(`Seed complete in ${((performance.now() - seedStart) / 1000).toFixed(1)}s`);
 
@@ -154,6 +198,7 @@ async function main(): Promise<void> {
 
   for (const bucket of BUCKETS) {
     console.error(`Running ${queriesPerBucket} ${bucket.name} queries...`);
+    const queryProgress = makeLatencyProgress(`${bucket.name} queries`, queriesPerBucket);
     for (let i = 0; i < queriesPerBucket; i++) {
       const q = bucket.queries[i % bucket.queries.length];
       const start = performance.now();
@@ -161,7 +206,10 @@ async function main(): Promise<void> {
       const ms = performance.now() - start;
       samplesByBucket[bucket.name].push(ms);
       totalRun++;
+      queryProgress.tick(i + 1);
     }
+    queryProgress.tick(queriesPerBucket, true);
+    queryProgress.finish();
   }
 
   // Cleanup
