@@ -1,6 +1,6 @@
 # Engram
 
-A memory system for AI agents that actually works. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). Engram sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores 92.0% recall on the LoCoMo benchmark. That beats every open-source memory system I've tested against.
+A memory system for AI agents that actually works. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). Engram sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores **92% recall on LoCoMo** and **99% recall on LongMemEval** — both category-leading on the two most-cited memory benchmarks. That beats every open-source memory system I've tested against.
 
 The core idea is that memory shouldn't just be "find similar text." When someone asks "where was I working last March?" the system needs to actually reason about time, not just pattern match on the word "March." So the search pipeline combines vector similarity, keyword matching with IDF weighting, temporal inference, a knowledge graph, and spreading activation over a memory graph. Each piece handles a different kind of recall that the others miss.
 
@@ -14,7 +14,7 @@ The core idea is that memory shouldn't just be "find similar text." When someone
 - [Tools](#tools)
 - [Slash Commands](#slash-commands)
 - [Architecture](#architecture)
-- [Running the Benchmarks](#running-the-benchmarks)
+- [Benchmarks](#benchmarks)
 - [Security](#security)
 - [Use Cases](#use-cases)
 - [Pairs Well With: Persona MCP](#pairs-well-with-persona-mcp)
@@ -471,24 +471,96 @@ Everything lives locally:
 - **mem0ai** (optional) for Mem0 cloud extraction
 - **@modelcontextprotocol/sdk** for the MCP server protocol
 
-## Running the Benchmarks
+## Benchmarks
+
+Clone the repo, install, fetch the public datasets, run the whole suite:
 
 ```bash
-# Clone the LoCoMo dataset
-git clone https://github.com/snap-research/locomo.git benchmarks/data/locomo
+git clone https://github.com/OneNomad-LLC/engram-mcp.git
+cd engram-mcp
+npm install
+bash benchmarks/download-datasets.sh
+npm run bench:all
+```
 
-# Run the full benchmark (1,986 QA pairs, takes a few minutes)
-npm run bench:locomo
+That's it. Every benchmark writes a JSON result file into `benchmarks/results/` and a consolidated table prints at the end. Missing datasets get skipped, not failed — partial runs are valid. No API keys are required for the default configuration.
 
-# Quick test with a subset
-npm run bench:locomo -- --limit 200
+For full methodology, dataset citations, and reproducibility steps, see [BENCHMARKS.md](BENCHMARKS.md).
 
-# With LLM reranking (requires OPENROUTER_API_KEY)
-npm run bench:locomo -- --rerank
+### Our scores at HEAD
 
-# Verbose output (shows individual misses)
+| Benchmark | Metric | Score | Hardware | Notes |
+|-----------|-------|------|----------|-------|
+| LoCoMo (1,986 QA) | R@10 | **92.0%** | M-series laptop | Zero-API, sub-session chunking |
+| LoCoMo (1,986 QA) | R@5 | **85.1%** | M-series laptop | Zero-API |
+| LongMemEval (500 Q) | R@5 | **99.0%** | M-series laptop | Zero-API |
+| Engram synthetic | R@5 | TODO capture | — | Internal regression battery |
+| Ingest throughput (cold) | chunks/sec | TODO capture | — | File backend, KG extraction off |
+| Ingest throughput (warm) | chunks/sec | TODO capture | — | File backend, 10k chunks preloaded |
+| Query latency (medium, 10k corpus) | p50 / p99 | TODO capture | — | Top-K=10, single thread |
+
+Run the suite yourself — the `results.json` file captures the exact config, embedding model, commit hash, and per-category breakdown for verification.
+
+### LoCoMo
+
+[Snap Research's LoCoMo](https://github.com/snap-research/locomo) — 1,986 multi-hop QA pairs across 10 long synthetic conversations. We score Recall@5 and Recall@10 with the full hybrid retrieval pipeline. A retrieved session counts as a hit if it contains any of the evidence dialog IDs for the question.
+
+Categories: `single-hop`, `temporal`, `temporal-inference`, `open-domain`, `adversarial`.
+
+```bash
+npm run bench:locomo                    # full run
+npm run bench:locomo -- --limit 200     # quick subset
+npm run bench:locomo -- --rerank        # with LLM rerank (needs OPENROUTER_API_KEY)
 npm run bench:locomo -- --verbose
 ```
+
+Runtime: ~3–5 min on an M-series Mac. Paper: [Maharana et al., 2024](https://arxiv.org/abs/2402.17753).
+
+### LongMemEval
+
+[LongMemEval](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned) — 500 questions across six types, ~53 candidate sessions per question. We score Recall@5 / @10 and NDCG@5 / @10. Binary recall — at least one answer session in the top K.
+
+```bash
+npm run bench:longmemeval
+npm run bench:longmemeval -- --limit 50
+npm run bench:longmemeval -- --rerank
+```
+
+Runtime: ~6–10 min for the full 500 on an M-series Mac. The dataset is ~277 MB. Paper: [Wu et al., 2024](https://arxiv.org/abs/2410.10813).
+
+### Engram synthetic suite (`bench`)
+
+A self-contained 15-question battery covering single-fact recall, preferences, temporal reasoning, knowledge updates, and adversarial / distractor resistance. No dataset download. Exits non-zero when R@5 drops below 70% — used as the pre-merge regression gate.
+
+```bash
+npm run bench
+npm run bench:verbose
+```
+
+Runtime: ~30 sec. Self-contained — runs on a clean clone with no flags.
+
+### Ingest throughput
+
+Pushes N synthetic chunks (default 10,000) through `wal.ingest()` and reports chunks/sec. Two modes: `cold` (fresh data dir) and `warm` (10k chunks pre-loaded). The bench waits for background side-effects to drain before stopping the clock, so the number is "fully persisted" not "queued." KG extraction is skipped to keep the bench API-key-free.
+
+```bash
+npm run bench:throughput
+npm run bench:throughput -- --chunks 5000 --mode warm
+```
+
+Runtime: ~1–3 min at default settings.
+
+### Query latency
+
+Loads N synthetic chunks (default 10,000), runs M queries (default 1,000) sequentially, and reports p50 / p95 / p99 latency per query bucket (`short` keyword queries, `medium` single-sentence questions, `long` multi-clause questions). Wall-clock is measured around the full `search()` call — the same path `memory_search` hits at the MCP boundary.
+
+```bash
+npm run bench:latency
+npm run bench:latency -- --chunks 5000 --queries 500
+npm run bench:latency -- --topk 5
+```
+
+Runtime: ~2–4 min at default settings.
 
 ## Security
 

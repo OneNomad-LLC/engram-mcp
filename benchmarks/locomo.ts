@@ -35,6 +35,7 @@ import type { StoredChunk } from '../src/storage.js';
 import { buildContextPrefix } from '../src/utils.js';
 import { chunkContent } from '../src/chunker.js';
 import { randomUUID } from 'node:crypto';
+import { writeBenchmarkResult, percentiles } from './lib/results.js';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -148,12 +149,14 @@ function sessionContainsEvidence(sessionDialogIds: string[], evidenceIds: string
 // ── Main ────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const benchStart = performance.now();
   const args = process.argv.slice(2);
   const verbose = args.includes('--verbose') || args.includes('-v');
   const limitArg = args.find((_, i) => args[i - 1] === '--limit');
   const limit = limitArg ? parseInt(limitArg) : undefined;
   const topK = 10;
   const useRerank = args.includes('--rerank');
+  const emitJson = !args.includes('--no-results');
 
   // Find dataset
   const dataPath = join(import.meta.dirname ?? '.', 'data', 'locomo', 'data', 'locomo10.json');
@@ -384,6 +387,41 @@ async function main(): Promise<void> {
   console.log(`  MemPalace hybrid v5:      R@10=88.9%`);
   console.log(`  Engram (this run):        R@10=${(avgR10 * 100).toFixed(1)}%`);
   console.log();
+
+  // ── Emit machine-readable result file ─────────────────────────
+  if (emitJson) {
+    const perCategory: Record<string, Record<string, unknown>> = {};
+    for (const [cat, catResults] of Object.entries(byCategory)) {
+      perCategory[cat] = {
+        n: catResults.length,
+        'recall@5': catResults.reduce((s, r) => s + r.recall5, 0) / catResults.length,
+        'recall@10': catResults.reduce((s, r) => s + r.recall10, 0) / catResults.length,
+        latencyMs: percentiles(catResults.map(r => r.latencyMs)),
+      };
+    }
+
+    const path = writeBenchmarkResult({
+      benchmark: 'locomo',
+      durationMs: Math.round(performance.now() - benchStart),
+      config: {
+        embeddingModel: process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2',
+        useRerank: useRerank && isLlmAvailable(),
+        topK,
+        questionLimit: limit ?? null,
+        conversations: dataset.length,
+      },
+      results: {
+        'recall@5': avgR5,
+        'recall@10': avgR10,
+        latencyMs: percentiles(results.map(r => r.latencyMs)),
+        questions: results.length,
+        hits5,
+        hits10,
+      },
+      perCategory,
+    });
+    console.log(`Results JSON: ${path}`);
+  }
 }
 
 main().catch(err => {

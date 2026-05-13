@@ -32,6 +32,7 @@ import { search, selectRelevant } from '../src/search.js';
 import type { SmartMemoryConfig, SearchResult } from '../src/types.js';
 import type { StoredChunk } from '../src/storage.js';
 import { randomUUID } from 'node:crypto';
+import { writeBenchmarkResult, percentiles } from './lib/results.js';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -88,11 +89,13 @@ function ndcgAtK(retrieved: string[], relevant: string[], k: number): number {
 // ── Main ────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const benchStart = performance.now();
   const args = process.argv.slice(2);
   const verbose = args.includes('--verbose') || args.includes('-v');
   const limitArg = args.find((_, i) => args[i - 1] === '--limit');
   const limit = limitArg ? parseInt(limitArg) : undefined;
   const useRerank = args.includes('--rerank');
+  const emitJson = !args.includes('--no-results');
 
   // Find dataset
   const dataPath = join(import.meta.dirname ?? '.', 'data', 'longmemeval_s_cleaned.json');
@@ -293,6 +296,43 @@ async function main(): Promise<void> {
   console.log(`  MemPalace hybrid v4 + Haiku:   R@5=100%   (Haiku rerank)`);
   console.log(`  Engram (this run):             R@5=${(avgR5 * 100).toFixed(1)}%  (${useRerank ? 'with rerank' : 'zero API'})`);
   console.log();
+
+  // ── Emit machine-readable result file ─────────────────────────
+  if (emitJson) {
+    const perCategory: Record<string, Record<string, unknown>> = {};
+    for (const [type, typeResults] of Object.entries(byType)) {
+      perCategory[type] = {
+        n: typeResults.length,
+        'recall@5': typeResults.reduce((s, r) => s + r.recall5, 0) / typeResults.length,
+        'recall@10': typeResults.reduce((s, r) => s + r.recall10, 0) / typeResults.length,
+        'ndcg@5': typeResults.reduce((s, r) => s + r.ndcg5, 0) / typeResults.length,
+        'ndcg@10': typeResults.reduce((s, r) => s + r.ndcg10, 0) / typeResults.length,
+        latencyMs: percentiles(typeResults.map(r => r.latencyMs)),
+      };
+    }
+
+    const path = writeBenchmarkResult({
+      benchmark: 'longmemeval',
+      durationMs: Math.round(performance.now() - benchStart),
+      config: {
+        embeddingModel: process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2',
+        useRerank: useRerank && isLlmAvailable(),
+        questionLimit: limit ?? null,
+      },
+      results: {
+        'recall@5': avgR5,
+        'recall@10': avgR10,
+        'ndcg@5': avgNDCG5,
+        'ndcg@10': avgNDCG10,
+        latencyMs: percentiles(results.map(r => r.latencyMs)),
+        questions: results.length,
+        hits5,
+        hits10,
+      },
+      perCategory,
+    });
+    console.log(`Results JSON: ${path}`);
+  }
 }
 
 main().catch(err => {

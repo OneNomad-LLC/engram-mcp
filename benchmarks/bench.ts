@@ -27,6 +27,7 @@ import { ingest } from '../src/wal.js';
 import { consolidate } from '../src/consolidator.js';
 import { addTriple, replaceTriple, queryGraph } from '../src/knowledge-graph.js';
 import type { SmartMemoryConfig } from '../src/types.js';
+import { writeBenchmarkResult, percentiles } from './lib/results.js';
 
 // ── Test Data ───────────────────────────────────────────────────────
 
@@ -201,7 +202,8 @@ interface BenchResult {
   resultCount: number;
 }
 
-async function runBenchmark(verbose: boolean): Promise<void> {
+async function runBenchmark(verbose: boolean, emitJson: boolean): Promise<void> {
+  const benchStart = performance.now();
   // Create isolated test environment
   const benchDir = join(tmpdir(), `engram-bench-${Date.now()}`);
   mkdirSync(benchDir, { recursive: true });
@@ -347,6 +349,44 @@ async function runBenchmark(verbose: boolean): Promise<void> {
   console.log(`  Database fact: ${activeDb.map(t => t.object).join(', ') || 'none'}`);
   console.log();
 
+  // ── Emit machine-readable result file ───────────────────────────
+  if (emitJson) {
+    const perCategory: Record<string, Record<string, unknown>> = {};
+    for (const cat of categories) {
+      const catResults = results.filter(r => r.category === cat);
+      perCategory[cat] = {
+        n: catResults.length,
+        'recall@5': catResults.reduce((s, r) => s + r.recall5, 0) / catResults.length,
+        'recall@10': catResults.reduce((s, r) => s + r.recall10, 0) / catResults.length,
+        'ndcg@5': catResults.reduce((s, r) => s + r.ndcg5, 0) / catResults.length,
+        'ndcg@10': catResults.reduce((s, r) => s + r.ndcg10, 0) / catResults.length,
+        latencyMs: percentiles(catResults.map(r => r.latencyMs)),
+        negativePassed: catResults.filter(r => r.negativePass).length,
+      };
+    }
+
+    const path = writeBenchmarkResult({
+      benchmark: 'engram-synthetic',
+      durationMs: Math.round(performance.now() - benchStart),
+      config: {
+        embeddingModel: process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2',
+        llmAvailable: !!process.env.OPENROUTER_API_KEY,
+        memoriesSeeded: chunkCount,
+        testCases: TEST_CASES.length,
+      },
+      results: {
+        'recall@5': avgR5,
+        'recall@10': avgR10,
+        'ndcg@5': avgNDCG5,
+        'ndcg@10': avgNDCG10,
+        latencyMs: percentiles(results.map(r => r.latencyMs)),
+        negativeResistance: { passed: totalNegPass, total: results.length },
+      },
+      perCategory,
+    });
+    console.log(`Results JSON: ${path}`);
+  }
+
   // Cleanup
   try { rmSync(benchDir, { recursive: true, force: true }); } catch { /* noop */ }
 
@@ -360,7 +400,8 @@ async function runBenchmark(verbose: boolean): Promise<void> {
 // ── Entry Point ─────────────────────────────────────────────────────
 
 const verbose = process.argv.includes('--verbose') || process.argv.includes('-v');
-runBenchmark(verbose).catch(err => {
+const emitJson = !process.argv.includes('--no-results');
+runBenchmark(verbose, emitJson).catch(err => {
   console.error('Benchmark error:', err);
   process.exit(1);
 });

@@ -41,7 +41,11 @@
     "bench": "node --import tsx benchmarks/bench.ts",
     "bench:verbose": "node --import tsx benchmarks/bench.ts --verbose",
     "bench:longmemeval": "node --import tsx benchmarks/longmemeval.ts",
-    "bench:locomo": "node --import tsx benchmarks/locomo.ts"
+    "bench:locomo": "node --import tsx benchmarks/locomo.ts",
+    "bench:throughput": "node --import tsx benchmarks/ingest-throughput.ts",
+    "bench:latency": "node --import tsx benchmarks/query-latency.ts",
+    "bench:download": "bash benchmarks/download-datasets.sh",
+    "bench:all": "node --import tsx benchmarks/bench-all.ts"
   },
   "dependencies": {
     "openai": "^4.80.0",
