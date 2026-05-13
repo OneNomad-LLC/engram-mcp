@@ -1,6 +1,6 @@
 {
   "name": "@onenomad/engram-mcp",
-  "version": "1.0.0-beta.11",
+  "version": "1.0.0-beta.12",
   "mcpName": "io.github.onenomad-llc/engram-mcp",
   "description": "Engram — memory MCP server for Claude Code, plus a library API for direct in-process use. LLM-powered extraction, hybrid ANN search, tier lifecycle, spreading activation, procedural rules, real-time ingest, Mem0, and session-state.",
   "type": "module",
