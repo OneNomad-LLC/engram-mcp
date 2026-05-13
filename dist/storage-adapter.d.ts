@@ -1,0 +1,103 @@
+/**
+ * StorageAdapter — the storage contract every backend implements.
+ *
+ * Engram supports two backends today:
+ *   - file       (default; LanceDB tables + markdown/JSON files under ENGRAM_DATA_DIR)
+ *   - postgres   (multi-tenant cloud; pgvector + jsonb columns)
+ *
+ * The adapter is pure async, scoped to a single tenant when running on
+ * postgres. No backend types (lancedb.Table, pg.Pool, fs.PathLike) leak
+ * through this interface — callers depend only on the shapes in
+ * src/types.ts and the few extra shapes re-exported below.
+ *
+ * Single-tenant file installs see no behavior change. Cloud installs
+ * route every query through `tenant_id`.
+ */
+import type { MemoryChunk, MemoryEdge, RecallOutcome, DailyLogEntry, MemoryTier, ProceduralRule, KnowledgeTriple, DiaryEntry } from './types.js';
+export interface StoredChunk extends MemoryChunk {
+    relatedMemories: MemoryEdge[];
+    recallOutcomes: RecallOutcome[];
+}
+export interface HandoffNote {
+    timestamp: string;
+    sessionId: string | null;
+    reason: 'compact' | 'session-end' | 'manual' | 'context-pressure';
+    currentTask: string;
+    completed: string[];
+    nextSteps: string[];
+    openQuestions: string[];
+    fileRefs: string[];
+    decisions: string[];
+    notes: string;
+}
+export interface HandoffSummary {
+    stamp: string;
+    timestamp: string;
+    reason: string;
+    currentTask: string;
+}
+export interface ListChunksOpts {
+    excludeTiers?: MemoryTier[];
+    tier?: MemoryTier;
+    cognitiveLayer?: string;
+    domain?: string;
+    topic?: string;
+    tag?: string;
+}
+export interface QueryTriplesOpts {
+    subject?: string;
+    predicate?: string;
+    object?: string;
+    activeOnly?: boolean;
+}
+export interface TripleStats {
+    total: number;
+    active: number;
+    invalidated: number;
+    subjects: number;
+    predicates: number;
+}
+export interface VectorHit {
+    chunk: StoredChunk;
+    distance: number;
+}
+export interface ReadDiaryOpts {
+    date?: string;
+    daysBack?: number;
+    agent?: string;
+}
+export interface StorageAdapter {
+    ensureReady(): Promise<void>;
+    close?(): Promise<void> | void;
+    saveChunk(chunk: StoredChunk): Promise<void>;
+    getChunk(id: string): Promise<StoredChunk | null>;
+    deleteChunk(id: string): Promise<void>;
+    listChunks(opts?: ListChunksOpts): Promise<StoredChunk[]>;
+    updateChunk(id: string, updates: Partial<StoredChunk>): Promise<void>;
+    chunkCount(): Promise<number>;
+    vectorSearch(queryEmbedding: number[], limit: number, filter?: string): Promise<VectorHit[]>;
+    getTaxonomy(): Promise<Record<string, Record<string, number>>>;
+    appendDailyEntry(date: string, entry: DailyLogEntry): Promise<void>;
+    getDailyLogs(daysBack: number): Promise<Array<{
+        date: string;
+        entries: DailyLogEntry[];
+    }>>;
+    saveRule(rule: ProceduralRule): Promise<void>;
+    getRules(): Promise<ProceduralRule[]>;
+    deleteRule(id: string): Promise<void>;
+    saveTriple(triple: KnowledgeTriple): Promise<void>;
+    queryTriples(opts?: QueryTriplesOpts): Promise<KnowledgeTriple[]>;
+    invalidateTriple(id: string): Promise<void>;
+    getTripleTimeline(entity: string): Promise<KnowledgeTriple[]>;
+    getTripleStats(): Promise<TripleStats>;
+    writeDiaryEntry(content: string, agent?: string): Promise<DiaryEntry>;
+    readDiary(opts?: ReadDiaryOpts): Promise<Array<{
+        date: string;
+        entries: DiaryEntry[];
+    }>>;
+    listDiaryDates(): Promise<string[]>;
+    writeHandoff(note: Omit<HandoffNote, 'timestamp'>): Promise<HandoffNote>;
+    readHandoff(stamp?: string): Promise<HandoffNote | null>;
+    listHandoffs(limit?: number): Promise<HandoffSummary[]>;
+}
+export type { MemoryEdge, RecallOutcome } from './types.js';

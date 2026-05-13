@@ -18,6 +18,9 @@
  * NOT re-exported -- they may change shape between minor versions.
  */
 export { Storage, type StoredChunk } from './storage.js';
+export { createStorageAdapter, resolveBackend, type StorageBackend, type CreateStorageOptions, } from './storage-factory.js';
+export { type StorageAdapter, type HandoffSummary, type ListChunksOpts, type QueryTriplesOpts, type TripleStats, type VectorHit, type ReadDiaryOpts, } from './storage-adapter.js';
+export { FileStorageAdapter } from './storage-file.js';
 export { loadConfig } from './config.js';
 export { search, selectRelevant, formatRecalledMemories } from './search.js';
 export { ingest, flushPendingSideEffects, pendingSideEffectCount, type IngestEntry, } from './wal.js';

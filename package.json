@@ -16,10 +16,12 @@
   },
   "bin": {
     "engram-memory": "dist/server.js",
-    "engram-mcp": "dist/cli.js"
+    "engram-mcp": "dist/cli.js",
+    "engram-migrate": "dist/migrate.js"
   },
   "files": [
     "dist",
+    "migrations",
     "README.md",
     "LICENSE",
     "NOTICE"
@@ -48,6 +50,9 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "mem0ai": "^2.4.5",
     "zod": "^3.24.0"
+  },
+  "optionalDependencies": {
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

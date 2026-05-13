@@ -19,6 +19,8 @@
  */
 // ── Storage ─────────────────────────────────────────────────────────
 export { Storage } from './storage.js';
+export { createStorageAdapter, resolveBackend, } from './storage-factory.js';
+export { FileStorageAdapter } from './storage-file.js';
 // ── Config ──────────────────────────────────────────────────────────
 export { loadConfig } from './config.js';
 // ── Hybrid search ───────────────────────────────────────────────────

@@ -1,27 +1,30 @@
 /**
- * Storage — backwards-compatible shim over the pluggable StorageAdapter.
+ * FileStorageAdapter — the default backend.
  *
- * Engram historically exposed a concrete `Storage` class that owned
- * LanceDB tables directly. ~20 modules import { Storage } from here
- * and call `new Storage(dataDir)` then `await storage.ensureReady()`.
- * The shim keeps that surface intact while delegating every method to
- * a backend adapter selected by createStorageAdapter().
+ * LanceDB tables under <dataDir>/lance for chunks/daily_logs/rules/
+ * knowledge_triples. Markdown files under <dataDir>/diary and JSON+MD
+ * files under <dataDir>/handoffs.
  *
- *   STORAGE_BACKEND=file        — FileStorageAdapter (default; LanceDB)
- *   STORAGE_BACKEND=postgres    — PostgresStorageAdapter (multi-tenant)
- *
- * File-mode callers (`new Storage(dataDir)`) see byte-identical
- * behavior to the pre-adapter implementation. Postgres-mode callers
- * skip the dataDir and read DATABASE_URL + TENANT_ID from env.
+ * Behavior must remain byte-identical to the pre-adapter Storage class
+ * for the file path — same on-disk schema, same markdown formats, same
+ * directory layout. The legacy Storage class in storage.ts is now a
+ * thin shim over this adapter.
  */
-import type { MemoryTier, DailyLogEntry, ProceduralRule, KnowledgeTriple, DiaryEntry } from './types.js';
-import type { StoredChunk, ListChunksOpts, QueryTriplesOpts, TripleStats, VectorHit, ReadDiaryOpts, HandoffNote, HandoffSummary } from './storage-adapter.js';
-export type { StoredChunk } from './storage-adapter.js';
-export declare class Storage {
-    private adapter;
+import type { DailyLogEntry, ProceduralRule, KnowledgeTriple, DiaryEntry } from './types.js';
+import type { StorageAdapter, StoredChunk, ListChunksOpts, QueryTriplesOpts, TripleStats, VectorHit, ReadDiaryOpts, HandoffNote, HandoffSummary } from './storage-adapter.js';
+export declare class FileStorageAdapter implements StorageAdapter {
+    private db;
+    private chunks;
+    private dailyLogs;
+    private rules;
+    private triples;
+    private dbPath;
     private ready;
+    readonly dataDir: string;
     constructor(dataDir: string);
+    private initAsync;
     ensureReady(): Promise<void>;
+    close(): void;
     saveChunk(chunk: StoredChunk): Promise<void>;
     getChunk(id: string): Promise<StoredChunk | null>;
     deleteChunk(id: string): Promise<void>;
@@ -52,6 +55,4 @@ export declare class Storage {
     writeHandoff(note: Omit<HandoffNote, 'timestamp'>): Promise<HandoffNote>;
     readHandoff(stamp?: string): Promise<HandoffNote | null>;
     listHandoffs(limit?: number): Promise<HandoffSummary[]>;
-    close(): void;
 }
-export type { MemoryTier };

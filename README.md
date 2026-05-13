@@ -106,7 +106,7 @@ Every chunk carries an `origin` tag that distinguishes user-asserted memory from
 - **`imported`** — bulk-loaded via `memory_import`.
 - **`derived`** — produced by consolidation (e.g. episodic-to-semantic summaries).
 
-The split mirrors the journal pattern in [Persona](https://github.com/OneNomad-LLC/persona): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
+The split mirrors the journal pattern in [Persona](https://github.com/OneNomad-LLC/persona-mcp): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
 
 Importance decays exponentially over time, but the rates differ by cognitive layer:
 - **Procedural** (rules): decays slowest (0.98/week, floor 0.15). Rules tend to stay relevant.
@@ -286,6 +286,47 @@ Then point your MCP client at `dist/server.js`:
 | `ENGRAM_EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | HuggingFace model for embeddings |
 | `ENGRAM_DEVICE` | `cpu` | Embedding device: `cpu`, `dml` (DirectML), or `cuda` |
 | `ENGRAM_MODEL` | `anthropic/claude-haiku-4.5` | OpenRouter model ID for LLM features. Only used when `OPENROUTER_API_KEY` is set. Any model on [openrouter.ai](https://openrouter.ai) works. |
+| `STORAGE_BACKEND` | `file` | Storage backend: `file` (LanceDB + filesystem, default) or `postgres` (multi-tenant cloud). See below. |
+| `DATABASE_URL` | (none) | Postgres connection string. Required when `STORAGE_BACKEND=postgres`. |
+| `TENANT_ID` | (none) | Tenant identifier — every row in postgres is scoped by this. Required when `STORAGE_BACKEND=postgres`. |
+
+### Cloud / multi-tenant mode
+
+By default Engram stores everything locally under `ENGRAM_DATA_DIR` (LanceDB tables for chunks/daily_logs/rules/knowledge_triples, plus markdown files for diary and handoffs). For a single user on a single machine this is the right answer — fast, offline, zero dependencies.
+
+For shared/cloud deployments where many users share one Engram process, Engram also speaks postgres with [pgvector](https://github.com/pgvector/pgvector).
+
+1. Provision a postgres database with the `vector` extension available.
+2. Set environment variables:
+
+   ```bash
+   export STORAGE_BACKEND=postgres
+   export DATABASE_URL=postgres://user:pass@host:5432/engram
+   export TENANT_ID=<one-id-per-user>
+   ```
+
+3. Install the postgres driver (it's an `optionalDependency`, so file-mode users don't pull it in):
+
+   ```bash
+   npm install pg
+   ```
+
+4. Run the schema migrations against the database once:
+
+   ```bash
+   DATABASE_URL=postgres://... npx engram-migrate
+   ```
+
+   This creates the six tables (`chunks`, `daily_logs`, `rules`, `knowledge_triples`, `diary_entries`, `handoffs`), enables the `vector` extension, and adds the hot-path indexes (per-tenant created_at, ivfflat on chunks.embedding, etc.). The runner is idempotent — re-running is a no-op for already-applied files.
+
+5. Boot Engram normally. Every query is scoped by `TENANT_ID`; switching tenants is just a different env var on a different process.
+
+**Notes**
+
+- pgvector required (`CREATE EXTENSION vector;`). The migration runs this for you when your DB role has the privileges; otherwise create it manually first.
+- Embedding dimension is 384 by default (matches the local `Xenova/all-MiniLM-L6-v2` model). If you change `ENGRAM_EMBEDDING_MODEL` to one with a different dimensionality, edit `migrations/postgres/001_init.sql` before running migrations.
+- Local file mode and postgres mode are **not** wire-compatible — there's no auto-import. If you're migrating an existing local install to the cloud, re-ingest is the path. Diary and handoffs in particular store different on-disk formats (markdown files vs. jsonb rows).
+- Single user, single machine: stay on `file`. The postgres path exists for the hosted Pyre deployment and similar shared infra.
 
 ## Tools
 
@@ -484,7 +525,7 @@ Here are some real situations where this makes a difference.
 
 ## Pairs Well With: Persona MCP
 
-If Engram is the brain, [Persona](https://github.com/OneNomad-LLC/persona) is the personality.
+If Engram is the brain, [Persona](https://github.com/OneNomad-LLC/persona-mcp) is the personality.
 
 Engram handles *what* the agent remembers: facts, preferences, rules, timelines. Persona handles *how* the agent communicates: tone, verbosity, format preferences, and communication style. They solve different problems but work best together.
 

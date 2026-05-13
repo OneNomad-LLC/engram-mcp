@@ -20,6 +20,22 @@
 
 // ── Storage ─────────────────────────────────────────────────────────
 export { Storage, type StoredChunk } from './storage.js';
+export {
+  createStorageAdapter,
+  resolveBackend,
+  type StorageBackend,
+  type CreateStorageOptions,
+} from './storage-factory.js';
+export {
+  type StorageAdapter,
+  type HandoffSummary,
+  type ListChunksOpts,
+  type QueryTriplesOpts,
+  type TripleStats,
+  type VectorHit,
+  type ReadDiaryOpts,
+} from './storage-adapter.js';
+export { FileStorageAdapter } from './storage-file.js';
 
 // ── Config ──────────────────────────────────────────────────────────
 export { loadConfig } from './config.js';

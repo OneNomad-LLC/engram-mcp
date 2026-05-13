@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 /**
  * Agent diary -- persistent cross-session journal.
@@ -33,16 +33,20 @@ export function writeDiaryEntry(dataDir, content, agent = 'claude') {
     const time = now();
     const path = diaryPath(dataDir, date);
     const entry = { date, time, content: content.trim(), agent };
-    // Append to the day's file
-    let existing = '';
-    if (existsSync(path)) {
-        existing = readFileSync(path, 'utf-8');
+    // Concurrent writers in a read-modify-write path can lose entries:
+    // two callers both read the file, both build `existing + new`, both
+    // writeFileSync — last write wins, the other entry is gone. Use
+    // appendFileSync so each entry is its own filesystem write and the
+    // OS append serializes. Header goes via writeFileSync only on file
+    // creation (best-effort race; both callers writing the header is
+    // benign — same content).
+    const entryText = `## ${time} (${agent})\n\n${entry.content}\n\n`;
+    if (!existsSync(path)) {
+        writeFileSync(path, `# Diary -- ${date}\n\n${entryText}`, 'utf-8');
     }
     else {
-        existing = `# Diary -- ${date}\n\n`;
+        appendFileSync(path, entryText, 'utf-8');
     }
-    const entryText = `## ${time} (${agent})\n\n${entry.content}\n\n`;
-    writeFileSync(path, existing + entryText, 'utf-8');
     return entry;
 }
 /**
