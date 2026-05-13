@@ -50,6 +50,7 @@ export class CloudStorageAdapter implements StorageAdapter {
 
   // Chunks ────────────────────────────────────────────────────────────
   async saveChunk(_chunk: StoredChunk): Promise<void> { notImplemented('saveChunk'); }
+  async saveChunks(_chunks: StoredChunk[]): Promise<void> { notImplemented('saveChunks'); }
   async getChunk(_id: string): Promise<StoredChunk | null> { notImplemented('getChunk'); }
   async deleteChunk(_id: string): Promise<void> { notImplemented('deleteChunk'); }
   async listChunks(_opts?: ListChunksOpts): Promise<StoredChunk[]> { notImplemented('listChunks'); }

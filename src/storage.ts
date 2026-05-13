@@ -66,6 +66,7 @@ export class Storage {
   // ── Chunks ────────────────────────────────────────────────────────
 
   saveChunk(chunk: StoredChunk): Promise<void> { return this.adapter.saveChunk(chunk); }
+  saveChunks(chunks: StoredChunk[]): Promise<void> { return this.adapter.saveChunks(chunks); }
   getChunk(id: string): Promise<StoredChunk | null> { return this.adapter.getChunk(id); }
   deleteChunk(id: string): Promise<void> { return this.adapter.deleteChunk(id); }
   listChunks(opts?: ListChunksOpts): Promise<StoredChunk[]> { return this.adapter.listChunks(opts); }

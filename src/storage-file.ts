@@ -186,34 +186,14 @@ export class FileStorageAdapter implements StorageAdapter {
 
   async saveChunk(chunk: StoredChunk): Promise<void> {
     try { await this.chunks.delete(`id = '${esc(chunk.id)}'`); } catch { /* noop */ }
+    await this.chunks.add([chunkToRow(chunk)]);
+  }
 
-    await this.chunks.add([{
-      id: chunk.id,
-      tier: chunk.tier,
-      content: chunk.content,
-      type: chunk.type,
-      cognitive_layer: chunk.cognitiveLayer,
-      tags: JSON.stringify(chunk.tags),
-      domain: chunk.domain ?? '',
-      topic: chunk.topic ?? '',
-      source: chunk.source,
-      importance: chunk.importance,
-      sentiment: chunk.sentiment,
-      created_at: chunk.createdAt,
-      last_recalled_at: chunk.lastRecalledAt ?? '',
-      recall_count: chunk.recallCount,
-      embedding: chunk.embedding ?? new Array(384).fill(0),
-      related_memories: JSON.stringify(chunk.relatedMemories),
-      recall_outcomes: JSON.stringify(chunk.recallOutcomes),
-      stability: chunk.stability ?? 1.0,
-      difficulty: chunk.difficulty ?? 0.3,
-      temporal_anchor: chunk.temporalAnchor ?? 0,
-      consolidation_level: chunk.consolidationLevel ?? 0,
-      source_chunk_ids: JSON.stringify(chunk.sourceChunkIds ?? []),
-      embedding_version: chunk.embeddingVersion ?? 1,
-      parent_chunk_id: chunk.parentChunkId ?? '',
-      origin: chunk.origin ?? 'derived',
-    }]);
+  async saveChunks(chunks: StoredChunk[]): Promise<void> {
+    if (chunks.length === 0) return;
+    // Fresh-insert path: one append per call, no delete. The contract
+    // (see StorageAdapter.saveChunks) is that callers only pass new ids.
+    await this.chunks.add(chunks.map(chunkToRow));
   }
 
   async getChunk(id: string): Promise<StoredChunk | null> {
@@ -508,6 +488,36 @@ export class FileStorageAdapter implements StorageAdapter {
 
 function esc(val: string): string {
   return val.replace(/'/g, "''");
+}
+
+function chunkToRow(chunk: StoredChunk): Record<string, unknown> {
+  return {
+    id: chunk.id,
+    tier: chunk.tier,
+    content: chunk.content,
+    type: chunk.type,
+    cognitive_layer: chunk.cognitiveLayer,
+    tags: JSON.stringify(chunk.tags),
+    domain: chunk.domain ?? '',
+    topic: chunk.topic ?? '',
+    source: chunk.source,
+    importance: chunk.importance,
+    sentiment: chunk.sentiment,
+    created_at: chunk.createdAt,
+    last_recalled_at: chunk.lastRecalledAt ?? '',
+    recall_count: chunk.recallCount,
+    embedding: chunk.embedding ?? new Array(384).fill(0),
+    related_memories: JSON.stringify(chunk.relatedMemories),
+    recall_outcomes: JSON.stringify(chunk.recallOutcomes),
+    stability: chunk.stability ?? 1.0,
+    difficulty: chunk.difficulty ?? 0.3,
+    temporal_anchor: chunk.temporalAnchor ?? 0,
+    consolidation_level: chunk.consolidationLevel ?? 0,
+    source_chunk_ids: JSON.stringify(chunk.sourceChunkIds ?? []),
+    embedding_version: chunk.embeddingVersion ?? 1,
+    parent_chunk_id: chunk.parentChunkId ?? '',
+    origin: chunk.origin ?? 'derived',
+  };
 }
 
 function rowToChunk(row: any): StoredChunk {

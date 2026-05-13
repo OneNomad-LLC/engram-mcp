@@ -25,17 +25,20 @@ let _client: OpenAI | null = null;
 
 function getClient(): OpenAI | null {
   if (_client) return _client;
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  // ENGRAM_LLM_BASE_URL lets users point at any OpenAI-compatible
+  // server (Ollama, LM Studio, llama.cpp, vLLM, a self-hosted proxy).
+  // When set, OPENROUTER_API_KEY can be any non-empty string — local
+  // servers usually don't check it, but the OpenAI SDK insists on one.
+  const baseURL = process.env.ENGRAM_LLM_BASE_URL ?? 'https://openrouter.ai/api/v1';
+  const isLocal = baseURL !== 'https://openrouter.ai/api/v1';
+  const apiKey = process.env.OPENROUTER_API_KEY ?? (isLocal ? 'local' : undefined);
   if (!apiKey) return null;
-  _client = new OpenAI({
-    baseURL: 'https://openrouter.ai/api/v1',
-    apiKey,
-  });
+  _client = new OpenAI({ baseURL, apiKey });
   return _client;
 }
 
 export function isLlmAvailable(): boolean {
-  return !!process.env.OPENROUTER_API_KEY;
+  return !!process.env.OPENROUTER_API_KEY || !!process.env.ENGRAM_LLM_BASE_URL;
 }
 
 export async function llmComplete(
