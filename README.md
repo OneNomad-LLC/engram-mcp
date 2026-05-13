@@ -289,7 +289,7 @@ Then point your MCP client at `dist/server.js`:
 | `STORAGE_BACKEND` | `file` | Storage backend: `file` (LanceDB + filesystem, default), `postgres` (self-hosted multi-tenant), or `cloud` (Pyre Cloud Pro). See below. |
 | `DATABASE_URL` | (none) | Postgres connection string. Required when `STORAGE_BACKEND=postgres`. |
 | `TENANT_ID` | (none) | Tenant identifier — every row in postgres is scoped by this. Required when `STORAGE_BACKEND=postgres`. |
-| `PYRE_API_URL` | `https://pyre-web-dev.up.railway.app` | Pyre Cloud base URL. Overridden by `--api-url` on `engram-mcp login`. |
+| `PYRE_API_URL` | (none) | pyre-web server URL for `engram-mcp login`. Alternative to the positional arg or `--server` flag — one of the three is required. |
 | `PYRE_API_KEY` | (none) | Pyre Cloud API key. Overrides the field from `~/.pyre/credentials.json` when set. |
 | `PYRE_CREDENTIALS_FILE` | `~/.pyre/credentials.json` | Override the credentials-file path (CI / headless installs). |
 
@@ -299,13 +299,21 @@ For Pyre Cloud Pro users:
 
 ```bash
 npm install -g @onenomad/engram-memory
-engram-mcp login
+engram-mcp login https://pyre.onenomad.com
 ```
 
-`login` opens a Pyre URL in your browser, shows you a one-time pairing code, and waits for you to approve the device. On approval it writes `~/.pyre/credentials.json` (mode 0600) and from that point on Engram automatically routes through your cloud Engram instance. Local data stays local; nothing changes for users who don't run `login`.
+`login` requires the pyre-web server URL. The binary ships with no hardcoded default — you point at whichever Pyre instance you're using (prod, staging, your own deployment). Three equivalent ways to supply it:
+
+```bash
+engram-mcp login https://pyre.onenomad.com          # positional argument
+engram-mcp login --server https://pyre.onenomad.com # flag
+PYRE_API_URL=https://pyre.onenomad.com engram-mcp login   # env var
+```
+
+`login` opens that URL in your browser, shows you a one-time pairing code, and waits for you to approve the device. On approval it writes `~/.pyre/credentials.json` (mode 0600) using the canonical `api_url` from the server's response — which may differ from the login URL you typed if the server normalises or redirects. From that point on Engram automatically routes through your cloud Engram instance. Local data stays local; nothing changes for users who don't run `login`.
 
 ```
-$ engram-mcp login
+$ engram-mcp login https://pyre.onenomad.com
 Open this URL in your browser to authorize:
 
   https://pyre.onenomad.com/connect

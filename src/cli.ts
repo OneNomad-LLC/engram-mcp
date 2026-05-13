@@ -29,7 +29,7 @@ Usage:
   engram-mcp                                              run MCP stdio server
   engram-mcp search  --query <q> [opts]                   hybrid search
   engram-mcp query   [opts]                               filter listing
-  engram-mcp login   [--api-url <url>]                    pair with Pyre Cloud
+  engram-mcp login   <server-url> | --server <url>        pair with Pyre Cloud
   engram-mcp logout                                       remove cached credentials
   engram-mcp help                                         this message
 
@@ -55,11 +55,14 @@ query options:
   --format json|text     output mode (default json)
 
 login options:
-  --api-url <url>        override the Pyre Cloud base URL (env: PYRE_API_URL)
+  <server-url>           (required) pyre-web server URL, e.g. https://pyre.onenomad.com
+  --server <url>         alternative to the positional arg
+                         (PYRE_API_URL env var also works)
 
 Environment:
   ENGRAM_DATA_DIR        data directory (default ~/.claude/engram)
-  PYRE_API_URL           override the Pyre Cloud base URL (login subcommand)
+  PYRE_API_URL           pyre-web server URL (login subcommand; alternative
+                         to positional arg / --server flag)
   PYRE_CREDENTIALS_FILE  override ~/.pyre/credentials.json location
 `;
 
@@ -77,7 +80,7 @@ const SEARCH_OPTS = {
 } as const satisfies ParseArgsConfig['options'];
 
 const LOGIN_OPTS = {
-  'api-url': { type: 'string' },
+  server: { type: 'string' },
 } as const satisfies ParseArgsConfig['options'];
 
 const QUERY_OPTS = {
@@ -236,9 +239,21 @@ async function runQuery(argv: string[]): Promise<void> {
 }
 
 async function runLoginCmd(argv: string[]): Promise<void> {
-  const { values } = parseArgs({ args: argv, options: LOGIN_OPTS, allowPositionals: false });
-  const { runLogin } = await import('./auth/login.js');
-  const code = await runLogin({ apiUrl: values['api-url'] });
+  // Server URL is required.  Accept three sources, in precedence:
+  //   1. Positional arg: engram-mcp login https://...
+  //   2. --server flag:  engram-mcp login --server https://...
+  //   3. PYRE_API_URL env var.
+  // If none supplied -- exit 1 with the spec'd message. No defaults
+  // are baked in; this binary works against any pyre-web instance the
+  // user points at.
+  const { values, positionals } = parseArgs({ args: argv, options: LOGIN_OPTS, allowPositionals: true });
+  const { resolveServerUrl, runLogin } = await import('./auth/login.js');
+  const apiUrl = resolveServerUrl({ positional: positionals[0], flag: values.server });
+  if (!apiUrl) {
+    process.stderr.write('Server URL required. Pass it as an argument or set PYRE_API_URL.\n');
+    process.exit(1);
+  }
+  const code = await runLogin({ apiUrl });
   process.exit(code);
 }
 

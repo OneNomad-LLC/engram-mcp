@@ -5,11 +5,15 @@
  *   1. POST /api/auth/device-code → user_code, device_code, verification_url, expires_in, interval.
  *   2. Print the URL + code, best-effort open the browser.
  *   3. Poll /api/auth/device-code/poll until approved / denied / expired / timeout.
- *   4. On approval, write ~/.pyre/credentials.json.
+ *   4. On approval, write ~/.pyre/credentials.json. The api_url written
+ *      to disk is the server-returned canonical URL from the poll
+ *      response, NOT the one the user typed at login time. Server is
+ *      the source of truth -- it may normalise / redirect / hand back
+ *      a different storage endpoint than the login endpoint.
  *
- * Server-side is hosted at https://pyre-web-dev.up.railway.app today and
- * will flip to https://pyre.onenomad.com at GA. The default lives in
- * DEFAULT_API_URL below — single line to change at flip time.
+ * No hardcoded URLs. The CLI requires the user to supply the server
+ * URL at login (positional arg, --server flag, or PYRE_API_URL env).
+ * Shipping prod is "users point at prod when they log in."
  *
  * Everything except the final success/failure line goes to stderr. The
  * URL + code block goes to stdout so a caller piping our output to a
@@ -18,20 +22,21 @@
 import { hostname, platform } from 'node:os';
 import { spawn } from 'node:child_process';
 import { writeCredentials, deleteCredentials, credentialsPath } from './credentials.js';
-/**
- * Default Pyre Cloud base URL. Single source of truth — flip this one
- * line when pyre.onenomad.com goes live.
- */
-export const DEFAULT_API_URL = 'https://pyre-web-dev.up.railway.app';
 const PACKAGE_NAME = 'engram-memory';
-function resolveApiUrl(opts) {
-    const fromFlag = opts.apiUrl?.trim();
-    if (fromFlag)
-        return fromFlag.replace(/\/+$/, '');
-    const fromEnv = process.env.PYRE_API_URL?.trim();
-    if (fromEnv)
-        return fromEnv.replace(/\/+$/, '');
-    return DEFAULT_API_URL;
+/**
+ * Resolve a user-supplied server URL from CLI arg / flag / env, in
+ * that precedence. Returns null when none of the three sources gave
+ * us a URL — caller is expected to print the spec'd error message
+ * and exit 1.
+ */
+export function resolveServerUrl(opts) {
+    const trim = (s) => {
+        const t = s?.trim();
+        if (!t)
+            return null;
+        return t.replace(/\/+$/, '');
+    };
+    return trim(opts.positional) ?? trim(opts.flag) ?? trim(process.env.PYRE_API_URL);
 }
 function sleepDefault(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -106,8 +111,8 @@ async function startDeviceCode(fetchImpl, apiUrl, deviceName, sleep) {
  * failure. Prints user-visible messages to stdout/stderr as documented
  * in the deliverable spec.
  */
-export async function runLogin(opts = {}) {
-    const apiUrl = resolveApiUrl(opts);
+export async function runLogin(opts) {
+    const apiUrl = opts.apiUrl.trim().replace(/\/+$/, '');
     const deviceName = opts.deviceName ?? hostname();
     const fetchImpl = opts.fetchImpl ?? fetch;
     const sleep = opts.sleep ?? sleepDefault;
