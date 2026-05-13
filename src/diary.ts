@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DiaryEntry } from './types.js';
 
@@ -46,16 +46,19 @@ export function writeDiaryEntry(
 
   const entry: DiaryEntry = { date, time, content: content.trim(), agent };
 
-  // Append to the day's file
-  let existing = '';
-  if (existsSync(path)) {
-    existing = readFileSync(path, 'utf-8');
-  } else {
-    existing = `# Diary -- ${date}\n\n`;
-  }
-
+  // Concurrent writers in a read-modify-write path can lose entries:
+  // two callers both read the file, both build `existing + new`, both
+  // writeFileSync — last write wins, the other entry is gone. Use
+  // appendFileSync so each entry is its own filesystem write and the
+  // OS append serializes. Header goes via writeFileSync only on file
+  // creation (best-effort race; both callers writing the header is
+  // benign — same content).
   const entryText = `## ${time} (${agent})\n\n${entry.content}\n\n`;
-  writeFileSync(path, existing + entryText, 'utf-8');
+  if (!existsSync(path)) {
+    writeFileSync(path, `# Diary -- ${date}\n\n${entryText}`, 'utf-8');
+  } else {
+    appendFileSync(path, entryText, 'utf-8');
+  }
 
   return entry;
 }

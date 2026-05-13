@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -65,8 +65,19 @@ export function writeHandoff(dataDir: string, note: Omit<HandoffNote, 'timestamp
   const full: HandoffNote = { ...note, timestamp };
   const stamp = stampFilename();
 
-  writeFileSync(handoffJsonPath(dataDir, stamp), JSON.stringify(full, null, 2), 'utf-8');
-  writeFileSync(handoffMdPath(dataDir, stamp), formatHandoffMarkdown(full), 'utf-8');
+  // Atomic write for the JSON+MD pair. Two non-atomic writeFileSync
+  // calls in a row could leave a JSON file with no markdown sibling
+  // (or vice versa) on crash, breaking the pairing readHandoff
+  // relies on. Stage both as .tmp first, then rename both -- minimizes
+  // the crash window to the gap between two consecutive renameSync
+  // calls (sub-millisecond). True cross-file atomicity isn't
+  // expressible in POSIX; this is the best practical approximation.
+  const jsonPath = handoffJsonPath(dataDir, stamp);
+  const mdPath = handoffMdPath(dataDir, stamp);
+  writeFileSync(`${jsonPath}.tmp`, JSON.stringify(full, null, 2), 'utf-8');
+  writeFileSync(`${mdPath}.tmp`, formatHandoffMarkdown(full), 'utf-8');
+  renameSync(`${jsonPath}.tmp`, jsonPath);
+  renameSync(`${mdPath}.tmp`, mdPath);
 
   return full;
 }
