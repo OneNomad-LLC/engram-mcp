@@ -24,6 +24,8 @@ Usage:
   engram-mcp                                              run MCP stdio server
   engram-mcp search  --query <q> [opts]                   hybrid search
   engram-mcp query   [opts]                               filter listing
+  engram-mcp login   [--api-url <url>]                    pair with Pyre Cloud
+  engram-mcp logout                                       remove cached credentials
   engram-mcp help                                         this message
 
 search options:
@@ -47,8 +49,13 @@ query options:
   --limit <n>            max results (default 25)
   --format json|text     output mode (default json)
 
+login options:
+  --api-url <url>        override the Pyre Cloud base URL (env: PYRE_API_URL)
+
 Environment:
   ENGRAM_DATA_DIR        data directory (default ~/.claude/engram)
+  PYRE_API_URL           override the Pyre Cloud base URL (login subcommand)
+  PYRE_CREDENTIALS_FILE  override ~/.pyre/credentials.json location
 `;
 const SEARCH_OPTS = {
     query: { type: 'string' },
@@ -59,6 +66,9 @@ const SEARCH_OPTS = {
     'min-relevance': { type: 'string' },
     format: { type: 'string' },
     'no-embed': { type: 'boolean' },
+};
+const LOGIN_OPTS = {
+    'api-url': { type: 'string' },
 };
 const QUERY_OPTS = {
     project: { type: 'string' },
@@ -208,6 +218,19 @@ async function runQuery(argv) {
         results: filtered.map(chunkToWire),
     }, null, 2) + '\n');
 }
+async function runLoginCmd(argv) {
+    const { values } = parseArgs({ args: argv, options: LOGIN_OPTS, allowPositionals: false });
+    const { runLogin } = await import('./auth/login.js');
+    const code = await runLogin({ apiUrl: values['api-url'] });
+    process.exit(code);
+}
+async function runLogoutCmd(argv) {
+    // Accept no flags today — but parse anyway so `--help` etc. don't
+    // silently become positional args.
+    parseArgs({ args: argv, options: {}, allowPositionals: false });
+    const { runLogout } = await import('./auth/login.js');
+    process.exit(runLogout());
+}
 async function main() {
     const [, , sub, ...rest] = process.argv;
     if (!sub || sub.startsWith('-')) {
@@ -226,6 +249,12 @@ async function main() {
             return;
         case 'query':
             await runQuery(rest);
+            return;
+        case 'login':
+            await runLoginCmd(rest);
+            return;
+        case 'logout':
+            await runLogoutCmd(rest);
             return;
         default:
             process.stderr.write(`engram-mcp: unknown subcommand "${sub}"\n\n${HELP}`);

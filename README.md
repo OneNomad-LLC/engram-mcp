@@ -286,9 +286,60 @@ Then point your MCP client at `dist/server.js`:
 | `ENGRAM_EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | HuggingFace model for embeddings |
 | `ENGRAM_DEVICE` | `cpu` | Embedding device: `cpu`, `dml` (DirectML), or `cuda` |
 | `ENGRAM_MODEL` | `anthropic/claude-haiku-4.5` | OpenRouter model ID for LLM features. Only used when `OPENROUTER_API_KEY` is set. Any model on [openrouter.ai](https://openrouter.ai) works. |
-| `STORAGE_BACKEND` | `file` | Storage backend: `file` (LanceDB + filesystem, default) or `postgres` (multi-tenant cloud). See below. |
+| `STORAGE_BACKEND` | `file` | Storage backend: `file` (LanceDB + filesystem, default), `postgres` (self-hosted multi-tenant), or `cloud` (Pyre Cloud Pro). See below. |
 | `DATABASE_URL` | (none) | Postgres connection string. Required when `STORAGE_BACKEND=postgres`. |
 | `TENANT_ID` | (none) | Tenant identifier — every row in postgres is scoped by this. Required when `STORAGE_BACKEND=postgres`. |
+| `PYRE_API_URL` | `https://pyre-web-dev.up.railway.app` | Pyre Cloud base URL. Overridden by `--api-url` on `engram-mcp login`. |
+| `PYRE_API_KEY` | (none) | Pyre Cloud API key. Overrides the field from `~/.pyre/credentials.json` when set. |
+| `PYRE_CREDENTIALS_FILE` | `~/.pyre/credentials.json` | Override the credentials-file path (CI / headless installs). |
+
+### Hosted (Pyre Cloud)
+
+For Pyre Cloud Pro users:
+
+```bash
+npm install -g @onenomad/engram-memory
+engram-mcp login
+```
+
+`login` opens a Pyre URL in your browser, shows you a one-time pairing code, and waits for you to approve the device. On approval it writes `~/.pyre/credentials.json` (mode 0600) and from that point on Engram automatically routes through your cloud Engram instance. Local data stays local; nothing changes for users who don't run `login`.
+
+```
+$ engram-mcp login
+Open this URL in your browser to authorize:
+
+  https://pyre.onenomad.com/connect
+
+Enter this code when prompted: PYRE-7K4M-9N2X
+(waiting for approval — Ctrl+C to cancel)
+Logged in. Credentials saved to ~/.pyre/credentials.json.
+```
+
+To sign out:
+
+```bash
+engram-mcp logout
+```
+
+This deletes `~/.pyre/credentials.json` and reverts Engram to local file mode on the next run. Idempotent — running it when you're already logged out exits 0.
+
+**Where credentials live**
+
+Credentials are stored at `~/.pyre/credentials.json` with mode `0600` (readable by you only). The file is a flat JSON object with `api_url`, `api_key`, `label`, `scopes`, and `issued_at`. Override the location with `PYRE_CREDENTIALS_FILE` if you have a multi-user setup.
+
+**Headless / CI installs**
+
+There's no terminal to open a browser from in CI. Skip `login` and set the env vars directly:
+
+```bash
+export STORAGE_BACKEND=cloud
+export PYRE_API_URL=https://pyre.onenomad.com
+export PYRE_API_KEY=sk_pyre_xxx
+```
+
+When `STORAGE_BACKEND` is unset, Engram probes for `~/.pyre/credentials.json` and uses cloud mode if it finds one. Explicit env vars always win.
+
+The existing `STORAGE_BACKEND=postgres` self-host path (below) is unaffected — none of this changes anything for users running their own postgres instance.
 
 ### Cloud / multi-tenant mode
 

@@ -29,6 +29,8 @@ Usage:
   engram-mcp                                              run MCP stdio server
   engram-mcp search  --query <q> [opts]                   hybrid search
   engram-mcp query   [opts]                               filter listing
+  engram-mcp login   [--api-url <url>]                    pair with Pyre Cloud
+  engram-mcp logout                                       remove cached credentials
   engram-mcp help                                         this message
 
 search options:
@@ -52,8 +54,13 @@ query options:
   --limit <n>            max results (default 25)
   --format json|text     output mode (default json)
 
+login options:
+  --api-url <url>        override the Pyre Cloud base URL (env: PYRE_API_URL)
+
 Environment:
   ENGRAM_DATA_DIR        data directory (default ~/.claude/engram)
+  PYRE_API_URL           override the Pyre Cloud base URL (login subcommand)
+  PYRE_CREDENTIALS_FILE  override ~/.pyre/credentials.json location
 `;
 
 type Format = 'json' | 'text';
@@ -67,6 +74,10 @@ const SEARCH_OPTS = {
   'min-relevance': { type: 'string' },
   format:          { type: 'string' },
   'no-embed':      { type: 'boolean' },
+} as const satisfies ParseArgsConfig['options'];
+
+const LOGIN_OPTS = {
+  'api-url': { type: 'string' },
 } as const satisfies ParseArgsConfig['options'];
 
 const QUERY_OPTS = {
@@ -224,6 +235,21 @@ async function runQuery(argv: string[]): Promise<void> {
   }, null, 2) + '\n');
 }
 
+async function runLoginCmd(argv: string[]): Promise<void> {
+  const { values } = parseArgs({ args: argv, options: LOGIN_OPTS, allowPositionals: false });
+  const { runLogin } = await import('./auth/login.js');
+  const code = await runLogin({ apiUrl: values['api-url'] });
+  process.exit(code);
+}
+
+async function runLogoutCmd(argv: string[]): Promise<void> {
+  // Accept no flags today — but parse anyway so `--help` etc. don't
+  // silently become positional args.
+  parseArgs({ args: argv, options: {}, allowPositionals: false });
+  const { runLogout } = await import('./auth/login.js');
+  process.exit(runLogout());
+}
+
 async function main(): Promise<void> {
   const [, , sub, ...rest] = process.argv;
 
@@ -244,6 +270,12 @@ async function main(): Promise<void> {
       return;
     case 'query':
       await runQuery(rest);
+      return;
+    case 'login':
+      await runLoginCmd(rest);
+      return;
+    case 'logout':
+      await runLogoutCmd(rest);
       return;
     default:
       process.stderr.write(`engram-mcp: unknown subcommand "${sub}"\n\n${HELP}`);
