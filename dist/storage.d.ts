@@ -23,6 +23,7 @@ export declare class Storage {
     constructor(dataDir: string);
     ensureReady(): Promise<void>;
     saveChunk(chunk: StoredChunk): Promise<void>;
+    saveChunks(chunks: StoredChunk[]): Promise<void>;
     getChunk(id: string): Promise<StoredChunk | null>;
     deleteChunk(id: string): Promise<void>;
     listChunks(opts?: ListChunksOpts): Promise<StoredChunk[]>;

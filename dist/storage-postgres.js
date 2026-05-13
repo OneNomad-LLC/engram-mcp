@@ -67,6 +67,36 @@ export class PostgresStorageAdapter {
     }
     // ── Chunks ─────────────────────────────────────────────────────────
     async saveChunk(chunk) {
+        const { params } = this.chunkInsertParams(chunk);
+        await this.pool.query(`INSERT INTO chunks (id, tenant_id, embedding, domain, content, metadata, created_at)
+       VALUES ($1, $2, $3::vector, $4, $5, $6::jsonb, $7)
+       ON CONFLICT (id) DO UPDATE SET
+         tenant_id = EXCLUDED.tenant_id,
+         embedding = EXCLUDED.embedding,
+         domain = EXCLUDED.domain,
+         content = EXCLUDED.content,
+         metadata = EXCLUDED.metadata`, params);
+    }
+    async saveChunks(chunks) {
+        if (chunks.length === 0)
+            return;
+        // One multi-row INSERT instead of N round-trips. Caller contract
+        // (StorageAdapter.saveChunks) guarantees fresh ids; we still keep
+        // ON CONFLICT DO NOTHING as a belt-and-suspenders against caller
+        // bugs rather than crashing mid-batch.
+        const values = [];
+        const params = [];
+        let p = 0;
+        for (const chunk of chunks) {
+            const row = this.chunkInsertParams(chunk).params;
+            values.push(`($${++p}, $${++p}, $${++p}::vector, $${++p}, $${++p}, $${++p}::jsonb, $${++p})`);
+            params.push(...row);
+        }
+        await this.pool.query(`INSERT INTO chunks (id, tenant_id, embedding, domain, content, metadata, created_at)
+       VALUES ${values.join(', ')}
+       ON CONFLICT (id) DO NOTHING`, params);
+    }
+    chunkInsertParams(chunk) {
         const embedding = chunk.embedding && chunk.embedding.length > 0
             ? this.vectorLiteral(chunk.embedding)
             : this.zeroVector();
@@ -96,22 +126,17 @@ export class PostgresStorageAdapter {
             parentChunkId: chunk.parentChunkId ?? '',
             origin: chunk.origin ?? 'derived',
         };
-        await this.pool.query(`INSERT INTO chunks (id, tenant_id, embedding, domain, content, metadata, created_at)
-       VALUES ($1, $2, $3::vector, $4, $5, $6::jsonb, $7)
-       ON CONFLICT (id) DO UPDATE SET
-         tenant_id = EXCLUDED.tenant_id,
-         embedding = EXCLUDED.embedding,
-         domain = EXCLUDED.domain,
-         content = EXCLUDED.content,
-         metadata = EXCLUDED.metadata`, [
-            chunk.id,
-            this.tenantId,
-            embedding,
-            chunk.domain ?? '',
-            chunk.content,
-            JSON.stringify(metadata),
-            chunk.createdAt,
-        ]);
+        return {
+            params: [
+                chunk.id,
+                this.tenantId,
+                embedding,
+                chunk.domain ?? '',
+                chunk.content,
+                JSON.stringify(metadata),
+                chunk.createdAt,
+            ],
+        };
     }
     async getChunk(id) {
         const { rows } = await this.pool.query(`SELECT id, domain, content, metadata, embedding::text AS embedding, created_at

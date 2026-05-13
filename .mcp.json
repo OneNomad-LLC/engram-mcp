@@ -1,12 +1,3 @@
 {
-  "mcpServers": {
-    "engram": {
-      "command": "node",
-      "args": ["{pluginDir}/dist/server.js"],
-      "env": {
-        "OPENROUTER_API_KEY": "",
-        "ENGRAM_MODEL": "anthropic/claude-haiku-4.5"
-      }
-    }
-  }
+  "mcpServers": {}
 }

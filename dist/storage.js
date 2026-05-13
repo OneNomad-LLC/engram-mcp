@@ -40,6 +40,7 @@ export class Storage {
     }
     // ── Chunks ────────────────────────────────────────────────────────
     saveChunk(chunk) { return this.adapter.saveChunk(chunk); }
+    saveChunks(chunks) { return this.adapter.saveChunks(chunks); }
     getChunk(id) { return this.adapter.getChunk(id); }
     deleteChunk(id) { return this.adapter.deleteChunk(id); }
     listChunks(opts) { return this.adapter.listChunks(opts); }

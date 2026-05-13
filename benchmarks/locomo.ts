@@ -154,7 +154,8 @@ async function main(): Promise<void> {
   const verbose = args.includes('--verbose') || args.includes('-v');
   const limitArg = args.find((_, i) => args[i - 1] === '--limit');
   const limit = limitArg ? parseInt(limitArg) : undefined;
-  const topK = 10;
+  const topKArg = args.find((_, i) => args[i - 1] === '--topK');
+  const topK = topKArg ? parseInt(topKArg) : 10;
   const useRerank = args.includes('--rerank');
   const emitJson = !args.includes('--no-results');
 

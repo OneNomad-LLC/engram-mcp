@@ -38,6 +38,8 @@ export declare class PostgresStorageAdapter implements StorageAdapter {
     private vectorLiteral;
     private zeroVector;
     saveChunk(chunk: StoredChunk): Promise<void>;
+    saveChunks(chunks: StoredChunk[]): Promise<void>;
+    private chunkInsertParams;
     getChunk(id: string): Promise<StoredChunk | null>;
     deleteChunk(id: string): Promise<void>;
     listChunks(opts?: ListChunksOpts): Promise<StoredChunk[]>;

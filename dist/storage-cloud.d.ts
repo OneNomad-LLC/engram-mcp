@@ -1,15 +1,17 @@
 /**
- * CloudStorageAdapter — Pyre Cloud HTTP-backed storage. STUB.
+ * CloudStorageAdapter — Pyre Cloud HTTP-backed storage.
  *
- * The cloud storage adapter is the next PR. For now this file exists
- * solely so that the storage factory can construct an adapter when a
- * ~/.pyre/credentials.json is present without having to special-case
- * the wiring up through the rest of the codebase.
+ * Speaks the wire contract pyre-web exposes at /api/engram/*. Each
+ * StorageAdapter method maps to a single HTTP request — pyre-web is
+ * a thin multi-tenant Postgres-over-HTTP shim that mirrors what
+ * PostgresStorageAdapter does locally.
  *
- * Every method throws with a clear "not yet implemented" message.
- * That's a feature, not a bug: a user who runs `engram-mcp login`
- * today should see an explicit failure instead of silently falling
- * back to local file mode and having two stores diverge.
+ * Auth: Bearer token from credentials.json. The server derives the
+ * tenant_id from the api-key; the adapter never plumbs it.
+ *
+ * Error envelope: pyre-web emits `{ "error": { "code", "message" } }`
+ * on non-2xx. errorBody() unpacks it; failures bubble up as Error
+ * with that text so the rest of the engram pipeline reports cleanly.
  */
 import type { StorageAdapter, StoredChunk, ListChunksOpts, HandoffNote, HandoffSummary, QueryTriplesOpts, TripleStats, VectorHit, ReadDiaryOpts } from './storage-adapter.js';
 import type { DailyLogEntry, ProceduralRule, KnowledgeTriple, DiaryEntry } from './types.js';
@@ -18,43 +20,51 @@ export interface CloudStorageOptions {
     apiKey: string;
     label?: string;
     scopes?: string[];
+    fetch?: typeof fetch;
 }
 export declare class CloudStorageAdapter implements StorageAdapter {
     readonly apiUrl: string;
     readonly apiKey: string;
     readonly label: string | undefined;
     readonly scopes: readonly string[];
+    private readonly fetchImpl;
     constructor(opts: CloudStorageOptions);
+    private url;
+    private headers;
+    private request;
+    private send;
+    private sendJson;
     ensureReady(): Promise<void>;
     close(): Promise<void>;
-    saveChunk(_chunk: StoredChunk): Promise<void>;
-    getChunk(_id: string): Promise<StoredChunk | null>;
-    deleteChunk(_id: string): Promise<void>;
-    listChunks(_opts?: ListChunksOpts): Promise<StoredChunk[]>;
-    updateChunk(_id: string, _updates: Partial<StoredChunk>): Promise<void>;
+    saveChunk(chunk: StoredChunk): Promise<void>;
+    saveChunks(chunks: StoredChunk[]): Promise<void>;
+    getChunk(id: string): Promise<StoredChunk | null>;
+    deleteChunk(id: string): Promise<void>;
+    listChunks(opts?: ListChunksOpts): Promise<StoredChunk[]>;
+    updateChunk(id: string, updates: Partial<StoredChunk>): Promise<void>;
     chunkCount(): Promise<number>;
-    vectorSearch(_q: number[], _limit: number, _filter?: string): Promise<VectorHit[]>;
+    vectorSearch(queryEmbedding: number[], limit: number, filter?: string): Promise<VectorHit[]>;
     getTaxonomy(): Promise<Record<string, Record<string, number>>>;
-    appendDailyEntry(_date: string, _entry: DailyLogEntry): Promise<void>;
-    getDailyLogs(_daysBack: number): Promise<Array<{
+    appendDailyEntry(date: string, entry: DailyLogEntry): Promise<void>;
+    getDailyLogs(daysBack: number): Promise<Array<{
         date: string;
         entries: DailyLogEntry[];
     }>>;
-    saveRule(_rule: ProceduralRule): Promise<void>;
+    saveRule(rule: ProceduralRule): Promise<void>;
     getRules(): Promise<ProceduralRule[]>;
-    deleteRule(_id: string): Promise<void>;
-    saveTriple(_triple: KnowledgeTriple): Promise<void>;
-    queryTriples(_opts?: QueryTriplesOpts): Promise<KnowledgeTriple[]>;
-    invalidateTriple(_id: string): Promise<void>;
-    getTripleTimeline(_entity: string): Promise<KnowledgeTriple[]>;
+    deleteRule(id: string): Promise<void>;
+    saveTriple(triple: KnowledgeTriple): Promise<void>;
+    queryTriples(opts?: QueryTriplesOpts): Promise<KnowledgeTriple[]>;
+    invalidateTriple(id: string): Promise<void>;
+    getTripleTimeline(entity: string): Promise<KnowledgeTriple[]>;
     getTripleStats(): Promise<TripleStats>;
-    writeDiaryEntry(_content: string, _agent?: string): Promise<DiaryEntry>;
-    readDiary(_opts?: ReadDiaryOpts): Promise<Array<{
+    writeDiaryEntry(content: string, agent?: string): Promise<DiaryEntry>;
+    readDiary(opts?: ReadDiaryOpts): Promise<Array<{
         date: string;
         entries: DiaryEntry[];
     }>>;
     listDiaryDates(): Promise<string[]>;
-    writeHandoff(_note: Omit<HandoffNote, 'timestamp'>): Promise<HandoffNote>;
-    readHandoff(_stamp?: string): Promise<HandoffNote | null>;
-    listHandoffs(_limit?: number): Promise<HandoffSummary[]>;
+    writeHandoff(note: Omit<HandoffNote, 'timestamp'>): Promise<HandoffNote>;
+    readHandoff(stamp?: string): Promise<HandoffNote | null>;
+    listHandoffs(limit?: number): Promise<HandoffSummary[]>;
 }

@@ -70,6 +70,15 @@ export interface StorageAdapter {
     ensureReady(): Promise<void>;
     close?(): Promise<void> | void;
     saveChunk(chunk: StoredChunk): Promise<void>;
+    /**
+     * Batched write. Treat every chunk as new — do NOT delete-then-insert
+     * the way saveChunk() does. Callers must only pass freshly-minted
+     * chunks (new UUIDs). This exists because single-row writes against
+     * LanceDB don't scale: each saveChunk creates a new fragment, and per-
+     * row delete-before-add scans the growing manifest. A single batched
+     * insert is the cliff fix for ingest throughput.
+     */
+    saveChunks(chunks: StoredChunk[]): Promise<void>;
     getChunk(id: string): Promise<StoredChunk | null>;
     deleteChunk(id: string): Promise<void>;
     listChunks(opts?: ListChunksOpts): Promise<StoredChunk[]>;

@@ -26,6 +26,7 @@ export declare class FileStorageAdapter implements StorageAdapter {
     ensureReady(): Promise<void>;
     close(): void;
     saveChunk(chunk: StoredChunk): Promise<void>;
+    saveChunks(chunks: StoredChunk[]): Promise<void>;
     getChunk(id: string): Promise<StoredChunk | null>;
     deleteChunk(id: string): Promise<void>;
     listChunks(opts?: ListChunksOpts): Promise<StoredChunk[]>;

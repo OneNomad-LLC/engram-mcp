@@ -50,6 +50,12 @@ export function pendingSideEffectCount() {
  */
 export async function ingest(config, storage, entries) {
     const chunks = [];
+    // Freshly-minted chunks that still need persisting. Cached-source
+    // stubs are added to `chunks` (so callers get them back) but skipped
+    // here, since the underlying rows are already on disk from a prior
+    // ingest. Flushed via storage.saveChunks() in one shot after the
+    // entries loop — replaces N round-trips with 1 against the backend.
+    const newChunks = [];
     for (const entry of entries) {
         if (!entry.content || entry.content.trim().length < 5)
             continue;
@@ -137,7 +143,7 @@ export async function ingest(config, storage, entries) {
                 content: trimmedContent,
                 consolidationLevel: -1, // Sentinel: parent container
             };
-            await storage.saveChunk(parentChunk);
+            newChunks.push(parentChunk);
             chunks.push(parentChunk);
             // Remember the parent chunk id keyed by source so a re-ingest
             // of the identical content within the same process returns this
@@ -168,7 +174,7 @@ export async function ingest(config, storage, entries) {
                     subChunk.embeddingVersion = 1;
                 }
                 catch { /* skip */ }
-                await storage.saveChunk(subChunk);
+                newChunks.push(subChunk);
                 chunks.push(subChunk);
             }
         }
@@ -195,11 +201,15 @@ export async function ingest(config, storage, entries) {
                 chunk.embeddingVersion = 1;
             }
             catch { /* skip */ }
-            await storage.saveChunk(chunk);
+            newChunks.push(chunk);
             chunks.push(chunk);
             // Single-chunk path: cache the chunk id keyed by source.
             sourceDedup.remember(entry.source, trimmedContent, chunk.id);
         }
+    }
+    // One batched write for every new chunk in the call.
+    if (newChunks.length > 0) {
+        await storage.saveChunks(newChunks);
     }
     // Per-batch side effects. Both opt-out via flags on any entry in
     // the batch (typical: memory_ingest calls ingest() with one entry,
