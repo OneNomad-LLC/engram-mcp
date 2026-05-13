@@ -217,7 +217,7 @@ If your tool can connect to an MCP server over stdio, Engram will work with it.
 ### Claude Code
 
 ```bash
-claude mcp add engram -- npx @onenomaddev/engram-mcp
+claude mcp add engram -- npx @onenomad/engram-mcp
 ```
 
 ### Claude Desktop
@@ -229,7 +229,7 @@ Add to your Claude Desktop config file. On macOS it's at `~/Library/Application 
   "mcpServers": {
     "engram": {
       "command": "npx",
-      "args": ["@onenomaddev/engram-mcp"]
+      "args": ["@onenomad/engram-mcp"]
     }
   }
 }
@@ -246,7 +246,7 @@ Add to your client's MCP config:
   "mcpServers": {
     "engram": {
       "command": "npx",
-      "args": ["@onenomaddev/engram-mcp"]
+      "args": ["@onenomad/engram-mcp"]
     }
   }
 }
@@ -298,7 +298,7 @@ Then point your MCP client at `dist/server.js`:
 For Pyre Cloud Pro users:
 
 ```bash
-npm install -g @onenomaddev/engram-mcp
+npm install -g @onenomad/engram-mcp
 engram-mcp login https://getpyre.ai
 ```
 
