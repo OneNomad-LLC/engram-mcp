@@ -19,9 +19,9 @@ Check on the memory system and run maintenance.
 
 ### Default (no args): Show health overview
 
-1. Call `memory_stats` for tier/layer/type breakdown
-2. Call `memory_rules` for active procedural rule count
-3. Call `memory_kg_stats` for knowledge graph size
+1. Call `engram-stats` for tier/layer/type breakdown
+2. Call `engram-rules` for active procedural rule count
+3. Call `engram-kg-stats` for knowledge graph size
 4. Present a clean summary:
    - Total memories by tier (daily / short-term / long-term / archive)
    - Cognitive layer breakdown (episodic / semantic / procedural)
@@ -32,7 +32,7 @@ Check on the memory system and run maintenance.
 
 ### With `maintain`: Run consolidation
 
-1. Call `memory_maintain` to trigger the full consolidation cycle
+1. Call `engram-maintain` to trigger the full consolidation cycle
 2. This runs: importance decay, tier promotion/demotion, duplicate detection and merging, stale memory archival, and graph edge cleanup
 3. Report what changed
 

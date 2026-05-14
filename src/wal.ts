@@ -70,8 +70,8 @@ export interface IngestEntry {
    * wal.ts), which is why its wall-clock is ~50× faster than Pyre's
    * MCP-boundary bench on the same dataset.
    *
-   * Real users keep KG extraction (it powers memory_dossier,
-   * memory_kg_query, graph rerank). Benchmark harnesses comparing
+   * Real users keep KG extraction (it powers engram-dossier,
+   * engram-kg-query, graph rerank). Benchmark harnesses comparing
    * apples-to-apples vs the standalone bench should pass this flag
    * so they're measuring the same code path.
    */
@@ -312,7 +312,7 @@ export async function ingest(
   }
 
   // Per-batch side effects. Both opt-out via flags on any entry in
-  // the batch (typical: memory_ingest calls ingest() with one entry,
+  // the batch (typical: engram-ingest calls ingest() with one entry,
   // so a single flag controls the path). Benchmark harnesses set
   // these to match what engram/benchmarks/locomo.ts does — its
   // direct-saveChunk path skips both, which is the source of the

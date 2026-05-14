@@ -73,7 +73,7 @@ export async function consolidate(storage: Storage, config?: SmartMemoryConfig):
 // ── Scratch tier: session-only memories ──────────────────────────────
 // Created by callers who want to keep something in the working set without
 // it being treated as canonical knowledge. Purged after SCRATCH_TTL_MS unless
-// promoted explicitly via memory_scratch_promote.
+// promoted explicitly via engram-scratch-promote.
 
 async function purgeExpiredScratch(storage: Storage, chunks: StoredChunk[]): Promise<number> {
   let purged = 0;
