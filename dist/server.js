@@ -23,6 +23,9 @@ import { syncBridge, loadBridgeFile } from './procedural-bridge.js';
 import { writeHandoff, readHandoff, listHandoffs } from './handoff.js';
 import { assessPressure } from './context-pressure.js';
 import { listRecentTraces, gcOldTraces } from './retrieval-trace.js';
+import { hostname } from 'node:os';
+import { startDeviceCode, pollDeviceCode, credentialsFromApproval, } from './auth/login.js';
+import { readCredentials, writeCredentials, deleteCredentials, credentialsPath, credentialsStat, } from './auth/credentials.js';
 // ── Config & Storage ────────────────────────────────────────────────
 const config = loadConfig();
 let _storage = null;
@@ -879,6 +882,158 @@ server.registerTool('memory_context_pressure', {
     }),
 }, async ({ level, reason, phaseBoundary }) => {
     return json(assessPressure(level, reason ?? '', phaseBoundary ?? false));
+});
+// ─────────────────────────────────────────────────────────────────────
+// CLOUD AUTH — device-code login + credentials file management
+// ─────────────────────────────────────────────────────────────────────
+// The MCP login flow is two-step because device-code pairing needs the
+// user to approve in a browser, which usually takes longer than a single
+// MCP tool call can wait. Tool 1 starts the pairing and returns the URL +
+// user code. Tool 2 polls for approval in chunks short enough to stay
+// under the MCP tool timeout. The caller re-invokes tool 2 if the user
+// is still finishing the browser flow.
+function sleepMs(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+// Cap a single resume call well under the MCP tool timeout. Leaves
+// headroom for the final pollDeviceCode round-trip after the loop's
+// "still pending" exit check.
+const RESUME_MAX_DURATION_MS = 45_000;
+server.registerTool('memory_login', {
+    title: 'Cloud Login (start device-code pairing)',
+    description: [
+        'Start a device-code login against a Pyre Cloud server (the same flow as the `engram-memory login` CLI command).',
+        'Returns the URL and user code the human must visit + enter in a browser. AFTER showing those to the user, call `memory_login_resume` with the returned `deviceCode` to poll for approval — it may need to be called more than once if the user is slow.',
+        'On approval the credentials file at `~/.pyre/credentials.json` (or $PYRE_CREDENTIALS_FILE) is written and Engram\'s cloud storage adapter starts using it on next server start.',
+    ].join(' '),
+    inputSchema: z.object({
+        serverUrl: z.string().describe('Pyre Cloud base URL (e.g. https://pyre.sh). No trailing slash needed.'),
+        label: z.string().optional().describe('Friendly device label to attach to the issued credential. Defaults to this machine\'s hostname.'),
+    }),
+}, async ({ serverUrl, label }) => {
+    const apiUrl = serverUrl.trim().replace(/\/+$/, '');
+    if (!apiUrl) {
+        return json({ ok: false, error: 'serverUrl is required (e.g. https://pyre.sh).' });
+    }
+    try {
+        const start = await startDeviceCode(fetch, apiUrl, label?.trim() || hostname(), sleepMs);
+        const expiresAt = Date.now() + start.expires_in * 1000;
+        return json({
+            ok: true,
+            serverUrl: apiUrl,
+            verificationUrl: start.verification_url,
+            userCode: start.user_code,
+            deviceCode: start.device_code,
+            intervalSeconds: start.interval,
+            expiresInSeconds: start.expires_in,
+            expiresAt,
+            instructions: `Show the user this URL and code, then call memory_login_resume({ serverUrl: "${apiUrl}", deviceCode: "${start.device_code}", intervalSeconds: ${start.interval}, expiresAt: ${expiresAt} }) to poll for approval. If it returns "pending", call it again.`,
+        });
+    }
+    catch (err) {
+        return json({ ok: false, error: `Could not reach ${apiUrl}: ${err.message}` });
+    }
+});
+server.registerTool('memory_login_resume', {
+    title: 'Cloud Login (resume / poll device-code)',
+    description: [
+        'Poll a device-code pairing started by `memory_login`. Polls for ~45s, then returns one of: approved, pending, denied, expired, error.',
+        'If "pending" is returned and `expiresAt` has not passed, call this tool again with the same arguments to keep waiting.',
+        'On "approved" the credentials file is written and the response includes the storage api_url assigned by the server.',
+    ].join(' '),
+    inputSchema: z.object({
+        serverUrl: z.string().describe('Pyre Cloud base URL — must match the one passed to memory_login.'),
+        deviceCode: z.string().describe('device_code returned by memory_login.'),
+        intervalSeconds: z.number().min(1).max(60).describe('Polling interval suggested by the server (returned by memory_login).'),
+        expiresAt: z.number().describe('Epoch ms after which the device code is expired (returned by memory_login).'),
+    }),
+}, async ({ serverUrl, deviceCode, intervalSeconds, expiresAt }) => {
+    const apiUrl = serverUrl.trim().replace(/\/+$/, '');
+    const intervalMs = Math.max(1, intervalSeconds) * 1000;
+    const stopAt = Math.min(Date.now() + RESUME_MAX_DURATION_MS, expiresAt);
+    while (Date.now() < stopAt) {
+        await sleepMs(intervalMs);
+        if (Date.now() >= stopAt)
+            break;
+        let body;
+        try {
+            body = await pollDeviceCode(fetch, apiUrl, deviceCode);
+        }
+        catch {
+            // Transient — keep polling until our window closes.
+            continue;
+        }
+        if (body.status === 'pending')
+            continue;
+        if (body.status === 'denied') {
+            return json({ ok: false, status: 'denied', error: 'Authorization denied.' });
+        }
+        if (body.status === 'expired') {
+            return json({ ok: false, status: 'expired', error: 'Pairing code expired. Call memory_login again.' });
+        }
+        if (body.status === 'approved') {
+            try {
+                const creds = credentialsFromApproval(body);
+                writeCredentials(creds);
+                return json({
+                    ok: true,
+                    status: 'approved',
+                    apiUrl: creds.api_url,
+                    label: creds.label,
+                    scopes: creds.scopes,
+                    credentialsPath: credentialsPath(),
+                    note: 'Credentials written. Restart the Engram MCP server (or your MCP client) for cloud storage to take effect.',
+                });
+            }
+            catch (err) {
+                return json({ ok: false, status: 'error', error: `Could not write credentials: ${err.message}` });
+            }
+        }
+    }
+    if (Date.now() >= expiresAt) {
+        return json({ ok: false, status: 'expired', error: 'Pairing code expired. Call memory_login again.' });
+    }
+    return json({
+        ok: true,
+        status: 'pending',
+        secondsUntilExpiry: Math.max(0, Math.floor((expiresAt - Date.now()) / 1000)),
+        note: 'Still waiting on browser approval. Call memory_login_resume again with the same arguments.',
+    });
+});
+server.registerTool('memory_login_status', {
+    title: 'Cloud Login Status',
+    description: 'Inspect the local Pyre Cloud credentials file. Returns whether the user is logged in, the api_url and label of the active credential, and the credentials file path. No network calls.',
+    inputSchema: z.object({}),
+}, async () => {
+    const path = credentialsPath();
+    const stat = credentialsStat();
+    const creds = readCredentials();
+    if (!creds) {
+        return json({ loggedIn: false, credentialsPath: path, fileExists: stat !== null });
+    }
+    return json({
+        loggedIn: true,
+        credentialsPath: path,
+        apiUrl: creds.api_url,
+        label: creds.label,
+        scopes: creds.scopes,
+        issuedAt: creds.issued_at,
+    });
+});
+server.registerTool('memory_logout', {
+    title: 'Cloud Logout',
+    description: 'Delete the local Pyre Cloud credentials file. Idempotent — succeeds whether or not the file existed. Engram falls back to local LanceDB on next server start.',
+    inputSchema: z.object({}),
+}, async () => {
+    const path = credentialsPath();
+    const removed = deleteCredentials();
+    return json({
+        ok: true,
+        loggedOut: removed,
+        alreadyLoggedOut: !removed,
+        credentialsPath: path,
+        note: removed ? 'Restart the Engram MCP server to fall back to local storage.' : undefined,
+    });
 });
 // ─────────────────────────────────────────────────────────────────────
 // DIAGNOSTIC RETRIEVAL TRACES

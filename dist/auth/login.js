@@ -82,7 +82,7 @@ async function postJson(fetchImpl, url, body) {
  * Start a device-code pairing. Retries up to 3 times with 1s/2s/4s
  * backoff on transient network failures before giving up.
  */
-async function startDeviceCode(fetchImpl, apiUrl, deviceName, sleep) {
+export async function startDeviceCode(fetchImpl, apiUrl, deviceName, sleep) {
     const url = `${apiUrl}/api/auth/device-code`;
     const backoffs = [1000, 2000, 4000];
     let lastErr;
@@ -105,6 +105,35 @@ async function startDeviceCode(fetchImpl, apiUrl, deviceName, sleep) {
         }
     }
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+/**
+ * Single poll of /api/auth/device-code/poll. Normalises HTTP 410 to
+ * the `expired` status the rest of the codebase already handles.
+ * Other non-2xx responses are surfaced as thrown errors so callers
+ * (CLI's loop, MCP tool) can decide whether to retry or give up.
+ */
+export async function pollDeviceCode(fetchImpl, apiUrl, deviceCode) {
+    const pollUrl = `${apiUrl}/api/auth/device-code/poll`;
+    const res = await postJson(fetchImpl, pollUrl, { device_code: deviceCode });
+    if (res.status === 410)
+        return { status: 'expired' };
+    if (res.status < 200 || res.status >= 300) {
+        throw new Error(`poll returned HTTP ${res.status}`);
+    }
+    return res.json;
+}
+/**
+ * Build a Credentials object from an approved poll response. Centralises
+ * the shape used by both the CLI and the MCP tool path.
+ */
+export function credentialsFromApproval(approved) {
+    return {
+        api_url: approved.api_url,
+        api_key: approved.api_key,
+        label: approved.label,
+        scopes: approved.scopes,
+        issued_at: new Date().toISOString(),
+    };
 }
 /**
  * Run the login flow end-to-end. Returns 0 on success, non-zero on
@@ -136,31 +165,19 @@ export async function runLogin(opts) {
     open(start.verification_url);
     const intervalMs = Math.max(1, start.interval) * 1000;
     const expiresAt = now() + start.expires_in * 1000;
-    const pollUrl = `${apiUrl}/api/auth/device-code/poll`;
     while (now() < expiresAt) {
         await sleep(intervalMs);
         if (now() >= expiresAt)
             break;
-        let pollRes;
+        let body;
         try {
-            pollRes = await postJson(fetchImpl, pollUrl, { device_code: start.device_code });
+            body = await pollDeviceCode(fetchImpl, apiUrl, start.device_code);
         }
         catch (err) {
-            // Transient — log to stderr and keep polling until expires_in
-            // wins.
+            // Transient — log and keep polling until expires_in wins.
             process.stderr.write(`engram: poll error (will retry): ${err.message}\n`);
             continue;
         }
-        // 410 carries `{ status: "expired" }` per the spec.
-        if (pollRes.status === 410) {
-            process.stderr.write(`Pairing code expired. Run \`engram-mcp login\` again.\n`);
-            return 1;
-        }
-        if (pollRes.status < 200 || pollRes.status >= 300) {
-            process.stderr.write(`engram: poll returned HTTP ${pollRes.status} (will retry)\n`);
-            continue;
-        }
-        const body = pollRes.json;
         switch (body.status) {
             case 'pending':
                 continue;
@@ -171,13 +188,7 @@ export async function runLogin(opts) {
                 process.stderr.write(`Pairing code expired. Run \`engram-mcp login\` again.\n`);
                 return 1;
             case 'approved': {
-                const creds = {
-                    api_url: body.api_url,
-                    api_key: body.api_key,
-                    label: body.label,
-                    scopes: body.scopes,
-                    issued_at: new Date().toISOString(),
-                };
+                const creds = credentialsFromApproval(body);
                 try {
                     writeCredentials(creds, opts.credentialsFile);
                 }

@@ -19,7 +19,27 @@
  * URL + code block goes to stdout so a caller piping our output to a
  * file gets only the actionable bits.
  */
-import { credentialsPath } from './credentials.js';
+import { credentialsPath, type Credentials } from './credentials.js';
+export interface DeviceCodeStart {
+    user_code: string;
+    device_code: string;
+    verification_url: string;
+    expires_in: number;
+    interval: number;
+}
+export type DeviceCodePoll = {
+    status: 'pending';
+} | {
+    status: 'approved';
+    api_url: string;
+    api_key: string;
+    label: string;
+    scopes: string[];
+} | {
+    status: 'denied';
+} | {
+    status: 'expired';
+};
 export interface LoginOptions {
     /**
      * pyre-web base URL. Required. Caller (the CLI) is responsible for
@@ -53,6 +73,25 @@ export declare function resolveServerUrl(opts: {
     positional?: string;
     flag?: string;
 }): string | null;
+/**
+ * Start a device-code pairing. Retries up to 3 times with 1s/2s/4s
+ * backoff on transient network failures before giving up.
+ */
+export declare function startDeviceCode(fetchImpl: typeof fetch, apiUrl: string, deviceName: string, sleep: (ms: number) => Promise<void>): Promise<DeviceCodeStart>;
+/**
+ * Single poll of /api/auth/device-code/poll. Normalises HTTP 410 to
+ * the `expired` status the rest of the codebase already handles.
+ * Other non-2xx responses are surfaced as thrown errors so callers
+ * (CLI's loop, MCP tool) can decide whether to retry or give up.
+ */
+export declare function pollDeviceCode(fetchImpl: typeof fetch, apiUrl: string, deviceCode: string): Promise<DeviceCodePoll>;
+/**
+ * Build a Credentials object from an approved poll response. Centralises
+ * the shape used by both the CLI and the MCP tool path.
+ */
+export declare function credentialsFromApproval(approved: Extract<DeviceCodePoll, {
+    status: 'approved';
+}>): Credentials;
 /**
  * Run the login flow end-to-end. Returns 0 on success, non-zero on
  * failure. Prints user-visible messages to stdout/stderr as documented
