@@ -676,16 +676,10 @@ You can run Engram without Persona and it works fine. But if you want an AI that
 
 ## License
 
-Licensed under the [Business Source License 1.1](LICENSE).
+Licensed under the [Apache License, Version 2.0](LICENSE).
 
-- **Licensor:** Matt Stvartak / OneNomad LLC
-- **Licensed Work:** Engram, Copyright (c) 2026 Matt Stvartak / OneNomad LLC
-- **Additional Use Grant:** You may use the Licensed Work for personal, educational, and non-commercial purposes. Production use in a commercial product or service requires a separate commercial license.
-- **Change Date:** April 10, 2030
-- **Change License:** Apache License, Version 2.0
+Copyright (c) 2026 Matt Stvartak / OneNomad LLC.
 
-Use it, fork it, learn from it, run it for yourself. You can't sell it, bundle it with paid software, host it as a service for profit, or rebrand it. On the change date it converts to Apache 2.0 and those restrictions go away.
+Use it, fork it, ship it. The full terms are in the [LICENSE](LICENSE) file.
 
-Want to use Engram commercially before then? Reach out. I'm not trying to lock things down, I just want to know where it ends up.
-
-For licensing inquiries: **matt@onenomad.dev**
+For inquiries: **matt@onenomad.dev**
