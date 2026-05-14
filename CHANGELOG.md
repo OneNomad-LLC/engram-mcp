@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-14
+
 ### Added
 - **Named handoff checkpoints.** `memory_handoff_write` now accepts an optional `name` so users can save labeled session checkpoints (e.g. `"engram-named-checkpoints"`) and resume them by name later.
 - **`memory_handoff_list` MCP tool.** Dedicated list-and-pick surface for saved handoffs/checkpoints. Returns newest-first entries including stamp, timestamp, reason, `currentTask` snippet, and (when set) the user-facing `name`.
@@ -17,4 +19,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `listHandoffs` now returns the exported `HandoffListEntry` shape, which includes the optional `name` field.
 - Handoff protocol blurb in the server description mentions named-checkpoint resume and "save this session" intent.
 
-[Unreleased]: https://github.com/onenomad-llc/engram-mcp/compare/main...HEAD
+[Unreleased]: https://github.com/onenomad-llc/engram-mcp/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/onenomad-llc/engram-mcp/compare/v1.0.0...v1.1.0
