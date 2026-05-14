@@ -95,15 +95,15 @@ daily (2 days) --> short-term (14 days) --> long-term (90 days) --> archive
 
 Promotion isn't just about age. A memory moves to long-term if it's been recalled multiple times, has high importance, received "helpful" feedback, or is a procedural rule. Memories that keep getting recalled stay promoted. Memories that never get touched decay and eventually archive.
 
-**Scratch tier** is for exploratory, session-only notes that you may want to discard. Pass `tier: 'scratch'` to `memory_ingest` and the chunk is excluded from every consolidation path: no promotion, no merging, no decay-to-archive, no linking. After 24 hours scratch chunks are auto-purged. Use `memory_scratch_promote` to graduate one to short-term once you've decided it's worth keeping.
+**Scratch tier** is for exploratory, session-only notes that you may want to discard. Pass `tier: 'scratch'` to `engram-ingest` and the chunk is excluded from every consolidation path: no promotion, no merging, no decay-to-archive, no linking. After 24 hours scratch chunks are auto-purged. Use `engram-scratch-promote` to graduate one to short-term once you've decided it's worth keeping.
 
 ### Memory Origin
 
 Every chunk carries an `origin` tag that distinguishes user-asserted memory from auto-derived memory:
 
-- **`user`** — written explicitly via `memory_ingest`. Treated as canonical user-territory: the consolidator never auto-merges, near-duplicate-deletes, or archives these. Importance still decays normally, but the content and lifecycle stay sacred.
-- **`extracted`** — pulled from a conversation by `memory_extract` or the Mem0 provider.
-- **`imported`** — bulk-loaded via `memory_import`.
+- **`user`** — written explicitly via `engram-ingest`. Treated as canonical user-territory: the consolidator never auto-merges, near-duplicate-deletes, or archives these. Importance still decays normally, but the content and lifecycle stay sacred.
+- **`extracted`** — pulled from a conversation by `engram-extract` or the Mem0 provider.
+- **`imported`** — bulk-loaded via `engram-import`.
 - **`derived`** — produced by consolidation (e.g. episodic-to-semantic summaries).
 
 The split mirrors the journal pattern in [Persona](https://github.com/OneNomad-LLC/persona-mcp): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
@@ -162,7 +162,7 @@ If a memory gets marked irrelevant 3+ times out of the last 5 recalls, its impor
 
 ### Knowledge Graph Auto-Population
 
-When a memory is ingested, the system heuristically extracts entity-relationship triples and adds them to the knowledge graph automatically. It detects 12 relationship types including `works-at`, `uses`, `depends-on`, `prefers`, `chose`, `located-in`, and more. This means the knowledge graph grows passively as memories accumulate, without needing explicit `memory_kg_add` calls for every fact.
+When a memory is ingested, the system heuristically extracts entity-relationship triples and adds them to the knowledge graph automatically. It detects 12 relationship types including `works-at`, `uses`, `depends-on`, `prefers`, `chose`, `located-in`, and more. This means the knowledge graph grows passively as memories accumulate, without needing explicit `engram-kg-add` calls for every fact.
 
 ### Governance Middleware
 
@@ -192,11 +192,11 @@ During consolidation, the system also scans for near-duplicates using cosine sim
 
 Context compaction is irreversible, and if the window fills completely before compaction runs the user has to abandon the chat. Engram treats this as a first-class failure mode and ships three tools that mechanize the fix:
 
-- `memory_handoff_write` persists a structured "where we left off" snapshot to `handoffs/YYYY-MM-DD_HH-MM-SS.{json,md}` — currentTask, completed, nextSteps, openQuestions, file references, decisions, and free-form notes. The JSON half is for programmatic resume; the markdown half is for humans.
-- `memory_handoff_read` loads the latest handoff (or a specific one by stamp). Agents call it at session start to pick up from exactly where the previous session stopped.
-- `memory_context_pressure` is a self-nudge: the agent reports its own pressure level (`ok`/`warm`/`hot`/`critical`) and gets back a deterministic action plan — when to save, when to write the handoff, when to compact early rather than riding the window to the edge. Passing `phaseBoundary=true` (task complete, pivoting focus, finishing a subsystem) overrides level and forces a proactive compact; the reasoning is that pivots thrash Anthropic's 5-minute prompt cache anyway, so eating that miss at the boundary is effectively free and avoids carrying the verbose tool output of the finished phase into the next one.
+- `engram-handoff-write` persists a structured "where we left off" snapshot to `handoffs/YYYY-MM-DD_HH-MM-SS.{json,md}` — currentTask, completed, nextSteps, openQuestions, file references, decisions, and free-form notes. The JSON half is for programmatic resume; the markdown half is for humans.
+- `engram-handoff-read` loads the latest handoff (or a specific one by stamp). Agents call it at session start to pick up from exactly where the previous session stopped.
+- `engram-context-pressure` is a self-nudge: the agent reports its own pressure level (`ok`/`warm`/`hot`/`critical`) and gets back a deterministic action plan — when to save, when to write the handoff, when to compact early rather than riding the window to the edge. Passing `phaseBoundary=true` (task complete, pivoting focus, finishing a subsystem) overrides level and forces a proactive compact; the reasoning is that pivots thrash Anthropic's 5-minute prompt cache anyway, so eating that miss at the boundary is effectively free and avoids carrying the verbose tool output of the finished phase into the next one.
 
-The bundled `engram_precompact_hook.sh` makes the write mandatory: it **blocks** compaction until `memory_handoff_write` has been called with `reason=compact`. Save constantly, compact at natural phase boundaries, and the next session starts with a full picture regardless of what happened in the previous one.
+The bundled `engram_precompact_hook.sh` makes the write mandatory: it **blocks** compaction until `engram-handoff-write` has been called with `reason=compact`. Save constantly, compact at natural phase boundaries, and the next session starts with a full picture regardless of what happened in the previous one.
 
 ## Compatibility
 
@@ -389,57 +389,57 @@ For shared/cloud deployments where many users share one Engram process, Engram a
 
 ## Tools
 
-The MCP server exposes 20 tools across six groups. Several earlier tools (`memory_format`, `memory_check_duplicate`, `memory_extract_rules`, `memory_taxonomy`, `memory_kg_stats`) were folded into their parent tools in 1.0.0-beta.6 — pass the relevant flag or mode to the parent instead. 1.0.0-beta.8 added the Handoff tools for cross-session continuity. 1.0.0 adds the memory origin field (user vs derived), the scratch tier, and `memory_scratch_promote`.
+The MCP server exposes 20 tools across six groups. Several earlier tools (`engram-format`, `engram-check-duplicate`, `engram-extract-rules`, `engram-taxonomy`, `engram-kg-stats`) were folded into their parent tools in 1.0.0-beta.6 — pass the relevant flag or mode to the parent instead. 1.0.0-beta.8 added the Handoff tools for cross-session continuity. 1.0.0 adds the memory origin field (user vs derived), the scratch tier, and `engram-scratch-promote`.
 
 ### Core Memory
 
 | Tool | What it does |
 |------|-------------|
-| `memory_search` | Hybrid ANN + keyword search with spreading activation. Supports a formatted output mode for prompt injection (replaces the old `memory_format`). |
-| `memory_ingest` | Write-ahead log: immediately persist a memory before responding. Runs duplicate detection inline (replaces `memory_check_duplicate`). Defaults `origin='user'` since explicit ingest is user-asserted; pass `tier: 'scratch'` for session-only notes. |
-| `memory_scratch_promote` | Graduate a scratch-tier memory to short-term so it survives the 24h auto-purge and enters the normal consolidation lifecycle. |
-| `memory_extract` | Extract memories from a conversation (LLM or heuristic). Rules-only mode replaces the old `memory_extract_rules`. |
-| `memory_maintain` | Run consolidation (decay, promote, link, merge, self-organize). Auto-describes unnamed memories, generates cross-links, and syncs the Persona procedural bridge when both servers are running. |
-| `memory_rules` | Show active procedural rules |
-| `memory_outcome` | Record recall feedback (helpful/corrected/irrelevant) |
-| `memory_session` | Manage session state (hot RAM scratchpad) |
-| `memory_stats` | Memory statistics by tier, layer, type. Includes KG stats, domain/topic taxonomy, and Persona bridge status (replaces `memory_kg_stats` and `memory_taxonomy`). |
+| `engram-search` | Hybrid ANN + keyword search with spreading activation. Supports a formatted output mode for prompt injection (replaces the old `engram-format`). |
+| `engram-ingest` | Write-ahead log: immediately persist a memory before responding. Runs duplicate detection inline (replaces `engram-check-duplicate`). Defaults `origin='user'` since explicit ingest is user-asserted; pass `tier: 'scratch'` for session-only notes. |
+| `engram-scratch-promote` | Graduate a scratch-tier memory to short-term so it survives the 24h auto-purge and enters the normal consolidation lifecycle. |
+| `engram-extract` | Extract memories from a conversation (LLM or heuristic). Rules-only mode replaces the old `engram-extract-rules`. |
+| `engram-maintain` | Run consolidation (decay, promote, link, merge, self-organize). Auto-describes unnamed memories, generates cross-links, and syncs the Persona procedural bridge when both servers are running. |
+| `engram-rules` | Show active procedural rules |
+| `engram-outcome` | Record recall feedback (helpful/corrected/irrelevant) |
+| `engram-session` | Manage session state (hot RAM scratchpad) |
+| `engram-stats` | Memory statistics by tier, layer, type. Includes KG stats, domain/topic taxonomy, and Persona bridge status (replaces `engram-kg-stats` and `engram-taxonomy`). |
 
 ### Knowledge Graph
 
 | Tool | What it does |
 |------|-------------|
-| `memory_kg_add` | Add a subject-predicate-object triple |
-| `memory_kg_query` | Query triples with optional filters |
-| `memory_kg_invalidate` | Mark a fact as no longer valid |
-| `memory_kg_timeline` | Get chronological history of an entity |
+| `engram-kg-add` | Add a subject-predicate-object triple |
+| `engram-kg-query` | Query triples with optional filters |
+| `engram-kg-invalidate` | Mark a fact as no longer valid |
+| `engram-kg-timeline` | Get chronological history of an entity |
 
 ### Diary
 
 | Tool | What it does |
 |------|-------------|
-| `memory_diary_write` | Write a session diary entry |
-| `memory_diary_read` | Read diary entries by date or range |
+| `engram-diary-write` | Write a session diary entry |
+| `engram-diary-read` | Read diary entries by date or range |
 
 ### Handoff (cross-session continuity)
 
 | Tool | What it does |
 |------|-------------|
-| `memory_handoff_write` | Structured "where we left off" snapshot — currentTask, completed, nextSteps, openQuestions, fileRefs, decisions, notes. Written before compaction or session end so a fresh session can resume without re-explanation. |
-| `memory_handoff_read` | Load the latest handoff (or one by stamp; `list=true` for recent stamps). Call at session start to pick up where the prior session left off. |
-| `memory_context_pressure` | Self-assess context window pressure (`ok`/`warm`/`hot`/`critical`) and receive a deterministic action plan — when to save memories, when to write a handoff, when to invoke `/compact`. Pass `phaseBoundary=true` at natural task/phase boundaries to force a proactive compact regardless of level (pivots thrash the cache anyway — compacting at the boundary is a free lunch). |
+| `engram-handoff-write` | Structured "where we left off" snapshot — currentTask, completed, nextSteps, openQuestions, fileRefs, decisions, notes. Written before compaction or session end so a fresh session can resume without re-explanation. |
+| `engram-handoff-read` | Load the latest handoff (or one by stamp; `list=true` for recent stamps). Call at session start to pick up where the prior session left off. |
+| `engram-context-pressure` | Self-assess context window pressure (`ok`/`warm`/`hot`/`critical`) and receive a deterministic action plan — when to save memories, when to write a handoff, when to invoke `/compact`. Pass `phaseBoundary=true` at natural task/phase boundaries to force a proactive compact regardless of level (pivots thrash the cache anyway — compacting at the boundary is a free lunch). |
 
 ### Governance
 
 | Tool | What it does |
 |------|-------------|
-| `memory_govern` | Run governance checks: contradiction detection (vector + heuristic + LLM), semantic drift monitoring, and memory poisoning detection. All advisory — flags issues without auto-deleting. |
+| `engram-govern` | Run governance checks: contradiction detection (vector + heuristic + LLM), semantic drift monitoring, and memory poisoning detection. All advisory — flags issues without auto-deleting. |
 
 ### Import
 
 | Tool | What it does |
 |------|-------------|
-| `memory_import` | Bulk import from Claude Code JSONL, ChatGPT JSON, or plain text |
+| `engram-import` | Bulk import from Claude Code JSONL, ChatGPT JSON, or plain text |
 
 ## Slash Commands
 
@@ -611,7 +611,7 @@ Runtime: ~1–3 min at default settings.
 
 ### Query latency
 
-Loads N synthetic chunks (default 10,000), runs M queries (default 1,000) sequentially, and reports p50 / p95 / p99 latency per query bucket (`short` keyword queries, `medium` single-sentence questions, `long` multi-clause questions). Wall-clock is measured around the full `search()` call — the same path `memory_search` hits at the MCP boundary.
+Loads N synthetic chunks (default 10,000), runs M queries (default 1,000) sequentially, and reports p50 / p95 / p99 latency per query bucket (`short` keyword queries, `medium` single-sentence questions, `long` multi-clause questions). Wall-clock is measured around the full `search()` call — the same path `engram-search` hits at the MCP boundary.
 
 ```bash
 npm run bench:latency
@@ -668,7 +668,7 @@ When both servers are running, they coordinate through three mechanisms:
 
 1. **Emotion-weighted memory importance.** Engram calls `persona_state` during ingestion to get the current emotional valence and arousal. High-arousal negative emotions boost memory importance by up to 30%. A frustrated correction gets remembered more strongly than a neutral fact.
 
-2. **Cognitive-load-gated search.** When Persona detects cognitive overload, Engram's `memory_search` receives the load signal and returns only the top 3 high-importance memories instead of the full result set. Less noise when you're already overwhelmed.
+2. **Cognitive-load-gated search.** When Persona detects cognitive overload, Engram's `engram-search` receives the load signal and returns only the top 3 high-importance memories instead of the full result set. Less noise when you're already overwhelmed.
 
 3. **Procedural bridge.** Engram's learned rules (from corrections and instructions) and Persona's applied evolution proposals sync through a shared bridge file at `~/.claude/procedural-bridge.json`. Engram rules become Persona proposals. Persona's applied proposals reinforce or create Engram rules. The bridge auto-syncs during `persona_consolidate`.
 

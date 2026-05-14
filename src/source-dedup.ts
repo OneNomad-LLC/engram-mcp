@@ -8,7 +8,7 @@
  * a 20K-token re-read can cost 5–15 seconds; multiplied across a
  * 50-step agent run that's significant wall-clock burn.
  *
- * The existing 0.75-similarity dedup (in `server.ts`'s memory_ingest
+ * The existing 0.75-similarity dedup (in `server.ts`'s engram-ingest
  * tool handler) catches semantic duplicates, but does so against the
  * ENTIRE memory store — and at write-time it actually trips on
  * incidentally-similar memories (a fact about Pyre at 0.78 similarity

@@ -40,10 +40,10 @@ architecture-patterns §1.
 
 ---
 
-## DEBT-002 — `memory_dossier` exists, but `memory_search` doesn't auto-route entity-shaped queries to it
+## DEBT-002 — `engram-dossier` exists, but `engram-search` doesn't auto-route entity-shaped queries to it
 
 **Where:** `src/search.ts` (every entity-shaped query goes straight
-through the hybrid retrieval pipeline). `memory_dossier` lives in
+through the hybrid retrieval pipeline). `engram-dossier` lives in
 `src/server.ts` as a separate MCP tool the caller has to invoke
 explicitly.
 
@@ -51,7 +51,7 @@ explicitly.
 structured snapshot (KG facts where entity is subject + referencedBy,
 plus categorized memory chunks). But there's no intent classifier
 that detects "what do you know about Matt" and routes the call to
-`memory_dossier` ahead of `memory_search`. The agent has to know to
+`engram-dossier` ahead of `engram-search`. The agent has to know to
 ask for the dossier.
 
 **Why:** Building the classifier means a small LLM call per search
@@ -59,8 +59,8 @@ ask for the dossier.
 negatives). Both punted on so the dossier could ship without
 blocking on classification.
 
-**What hurts:** Agents that don't know about `memory_dossier` —
-which is most of them, since `memory_search` is the canonical entry
+**What hurts:** Agents that don't know about `engram-dossier` —
+which is most of them, since `engram-search` is the canonical entry
 point — fall back to RAG-style retrieval for entity queries.
 Authoritative entity facts get retrieved as memories with relevance
 scores rather than loaded as ground truth, and the model can
@@ -104,7 +104,7 @@ deliberate re-calibration of the production floor.
 **Where:** `src/retrieval-trace.ts` defines the trace primitive;
 `src/search.ts` records `corpusSize`, `vectorAboveFloor`,
 `vectorBelowFloor`, `keywordMatches`, and `finalCount`. The
-`memory_trace_recent` MCP tool surfaces them.
+`engram-trace-recent` MCP tool surfaces them.
 
 **Choice:** Stage instrumentation is intentionally minimal — vector
 above/below floor + keyword matches + final count. The remaining
@@ -188,7 +188,7 @@ validator.
 ## DEBT-007 — No audit events with trace IDs on mutations
 
 **Where:** `src/storage.ts`, every write path
-(`memory_ingest`, `memory_update_metadata`, `memory_kg_add`, etc.).
+(`engram-ingest`, `engram-update-metadata`, `engram-kg-add`, etc.).
 
 **Choice:** Writes succeed (or fail), but no separate audit event is
 emitted with actor + scope + before/after diff + trace ID linking back

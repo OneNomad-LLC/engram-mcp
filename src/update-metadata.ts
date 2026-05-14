@@ -19,7 +19,7 @@ export interface UpdateMetadataInput {
 export type UpdateMetadataMode = 'merge' | 'replace';
 
 /**
- * Pure helper: build the storage patch for a memory_update_metadata
+ * Pure helper: build the storage patch for a engram-update-metadata
  * call. Separated from server.ts so importing it (e.g. from tests)
  * doesn't pull in the MCP stdio server bootstrap.
  *

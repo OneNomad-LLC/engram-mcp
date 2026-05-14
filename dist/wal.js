@@ -212,7 +212,7 @@ export async function ingest(config, storage, entries) {
         await storage.saveChunks(newChunks);
     }
     // Per-batch side effects. Both opt-out via flags on any entry in
-    // the batch (typical: memory_ingest calls ingest() with one entry,
+    // the batch (typical: engram-ingest calls ingest() with one entry,
     // so a single flag controls the path). Benchmark harnesses set
     // these to match what engram/benchmarks/locomo.ts does — its
     // direct-saveChunk path skips both, which is the source of the

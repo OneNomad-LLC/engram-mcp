@@ -9,7 +9,7 @@
  * report shows latency distribution, not a single point.
  *
  * Wall-clock is measured around the full search() call — this is
- * the same path that memory_search hits at the MCP boundary, not
+ * the same path that engram-search hits at the MCP boundary, not
  * just the vector op.
  *
  * Usage:
