@@ -13,6 +13,8 @@
 export interface HandoffNote {
     /** ISO timestamp of when this handoff was written */
     timestamp: string;
+    /** Optional human-friendly checkpoint name (e.g. "engram-named-checkpoints"). Allows list-and-pick resume across many saved sessions. */
+    name?: string;
     /** Session or conversation identifier */
     sessionId: string | null;
     /** Why the handoff was written: compact, session-end, manual, context-pressure */
@@ -36,13 +38,16 @@ export interface HandoffNote {
  * Write a handoff note. Persists BOTH JSON (machine-readable) and markdown (human-readable).
  */
 export declare function writeHandoff(dataDir: string, note: Omit<HandoffNote, 'timestamp'>): HandoffNote;
-export declare function readHandoff(dataDir: string, stamp?: string): HandoffNote | null;
-/**
- * List handoff stamps, newest first.
- */
-export declare function listHandoffs(dataDir: string, limit?: number): Array<{
+export declare function readHandoff(dataDir: string, identifier?: string): HandoffNote | null;
+export interface HandoffListEntry {
     stamp: string;
     timestamp: string;
     reason: string;
     currentTask: string;
-}>;
+    name?: string;
+}
+/**
+ * List handoff checkpoints, newest first. Includes the optional `name` so a
+ * caller can present a list-and-pick UI keyed on either stamp or name.
+ */
+export declare function listHandoffs(dataDir: string, limit?: number): HandoffListEntry[];
