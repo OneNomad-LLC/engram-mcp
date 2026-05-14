@@ -17,6 +17,8 @@ import { join } from 'node:path';
 export interface HandoffNote {
   /** ISO timestamp of when this handoff was written */
   timestamp: string;
+  /** Optional human-friendly checkpoint name (e.g. "engram-named-checkpoints"). Allows list-and-pick resume across many saved sessions. */
+  name?: string;
   /** Session or conversation identifier */
   sessionId: string | null;
   /** Why the handoff was written: compact, session-end, manual, context-pressure */
@@ -83,7 +85,12 @@ export function writeHandoff(dataDir: string, note: Omit<HandoffNote, 'timestamp
 }
 
 /**
- * Read the most recent handoff, or a specific one by stamp.
+ * Read the most recent handoff, or a specific one by stamp or name.
+ *
+ * Identifier resolution order:
+ *   1. No identifier → latest timestamped handoff
+ *   2. Identifier matches stamp regex → load by stamp
+ *   3. Otherwise → scan handoff JSONs for `name` field match (newest match wins)
  */
 // Timestamped handoff filenames look like "2026-04-22_14-32-05-123Z" (what
 // stampFilename() produces). The rolling `session-checkpoint.json` written
@@ -91,24 +98,37 @@ export function writeHandoff(dataDir: string, note: Omit<HandoffNote, 'timestamp
 // handoffs when readHandoff() picks the latest.
 const STAMP_RE = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/;
 
-export function readHandoff(dataDir: string, stamp?: string): HandoffNote | null {
+export function readHandoff(dataDir: string, identifier?: string): HandoffNote | null {
   const dir = handoffDir(dataDir);
   if (!existsSync(dir)) return null;
 
-  let targetStamp = stamp;
-  if (!targetStamp) {
+  if (!identifier) {
     const allJson = readdirSync(dir).filter(f => f.endsWith('.json'));
     const timestamped = allJson.filter(f => STAMP_RE.test(f)).sort().reverse();
-    // Prefer an explicitly-written, timestamped handoff; fall back to any
-    // other .json (e.g. the rolling session checkpoint) only if none exist.
     const pick = timestamped[0] ?? allJson.sort().reverse()[0];
     if (!pick) return null;
-    targetStamp = pick.replace(/\.json$/, '');
+    return loadHandoffFile(handoffJsonPath(dataDir, pick.replace(/\.json$/, '')));
   }
 
-  const path = handoffJsonPath(dataDir, targetStamp);
-  if (!existsSync(path)) return null;
+  if (STAMP_RE.test(identifier)) {
+    return loadHandoffFile(handoffJsonPath(dataDir, identifier));
+  }
 
+  // Name lookup — scan newest first, return first hit.
+  const stamps = readdirSync(dir)
+    .filter(f => f.endsWith('.json'))
+    .map(f => f.replace(/\.json$/, ''))
+    .sort()
+    .reverse();
+  for (const stamp of stamps) {
+    const note = loadHandoffFile(handoffJsonPath(dataDir, stamp));
+    if (note?.name === identifier) return note;
+  }
+  return null;
+}
+
+function loadHandoffFile(path: string): HandoffNote | null {
+  if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as HandoffNote;
   } catch {
@@ -116,10 +136,19 @@ export function readHandoff(dataDir: string, stamp?: string): HandoffNote | null
   }
 }
 
+export interface HandoffListEntry {
+  stamp: string;
+  timestamp: string;
+  reason: string;
+  currentTask: string;
+  name?: string;
+}
+
 /**
- * List handoff stamps, newest first.
+ * List handoff checkpoints, newest first. Includes the optional `name` so a
+ * caller can present a list-and-pick UI keyed on either stamp or name.
  */
-export function listHandoffs(dataDir: string, limit = 10): Array<{ stamp: string; timestamp: string; reason: string; currentTask: string }> {
+export function listHandoffs(dataDir: string, limit = 10): HandoffListEntry[] {
   const dir = handoffDir(dataDir);
   if (!existsSync(dir)) return [];
 
@@ -130,7 +159,7 @@ export function listHandoffs(dataDir: string, limit = 10): Array<{ stamp: string
     .reverse()
     .slice(0, limit);
 
-  const results: Array<{ stamp: string; timestamp: string; reason: string; currentTask: string }> = [];
+  const results: HandoffListEntry[] = [];
   for (const stamp of stamps) {
     try {
       const note = JSON.parse(readFileSync(handoffJsonPath(dataDir, stamp), 'utf-8')) as HandoffNote;
@@ -139,6 +168,7 @@ export function listHandoffs(dataDir: string, limit = 10): Array<{ stamp: string
         timestamp: note.timestamp,
         reason: note.reason,
         currentTask: note.currentTask,
+        ...(note.name ? { name: note.name } : {}),
       });
     } catch {
       // Skip malformed
@@ -149,9 +179,11 @@ export function listHandoffs(dataDir: string, limit = 10): Array<{ stamp: string
 
 function formatHandoffMarkdown(note: HandoffNote): string {
   const lines: string[] = [
-    `# Handoff — ${note.timestamp}`,
+    `# Handoff — ${note.name ?? note.timestamp}`,
     '',
+    note.name ? `**Name:** ${note.name}` : '',
     `**Reason:** ${note.reason}`,
+    `**Timestamp:** ${note.timestamp}`,
     note.sessionId ? `**Session:** ${note.sessionId}` : '',
     '',
     '## Current Task',

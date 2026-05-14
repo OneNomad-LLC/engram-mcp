@@ -76,10 +76,10 @@ const server = new McpServer(
       'Context compaction can fail if the window fills completely. When that happens, the user has to abandon the chat. Never let this happen.',
       '',
       '1. Save memories continuously with memory_ingest — never batch.',
-      '2. At session start, call memory_handoff_read to resume where the prior session left off.',
+      '2. At session start, call memory_handoff_read to resume where the prior session left off. If the user references a specific past session (by name or topic), call memory_handoff_list first and load the matching named checkpoint with memory_handoff_read({ name }).',
       '3. When context feels heavy (long tool outputs, many file reads, extended work) call memory_context_pressure with your honest level assessment. Follow the returned actionPlan.',
       '4. At NATURAL PHASE BOUNDARIES (task done, pivoting focus, finishing a subsystem, user says "ok next let\'s…") call memory_context_pressure with phaseBoundary=true and compact. Pivots thrash the cache anyway — compacting at the boundary is a free lunch, carrying verbose tool output from the old phase into the new one is not.',
-      '5. BEFORE invoking /compact — or before session end — call memory_handoff_write with a full "where we left off" snapshot: currentTask, completed, nextSteps, openQuestions, fileRefs (path:line), decisions, notes. This is the lifeline if compaction fails.',
+      '5. BEFORE invoking /compact — or before session end, or when the user asks to "save this session" / "checkpoint this" — call memory_handoff_write with a full "where we left off" snapshot: currentTask, completed, nextSteps, openQuestions, fileRefs (path:line), decisions, notes. Pass `name` for a user-friendly checkpoint label so the user can resume it explicitly later.',
       '6. Do not wait for the system to auto-compact. Compact early, while there is still headroom for the handoff.',
       '',
       'If persona MCP available: call persona_signal on user reactions (correction, approval, frustration, praise, etc).',
@@ -957,9 +957,10 @@ server.registerTool(
   'memory_handoff_write',
   {
     title: 'Write Handoff Note',
-    description: 'Write a structured "where we left off" snapshot. Call BEFORE /compact, before session end, or when context_pressure returns hot/critical. This is the lifeline if the context window fills before compaction runs. Fields: currentTask, completed, nextSteps, openQuestions, fileRefs, decisions, notes.',
+    description: 'Write a structured "where we left off" snapshot (a.k.a. session checkpoint). Call BEFORE /compact, before session end, when context_pressure returns hot/critical, or when the user asks to "save this session." Pass an optional `name` (e.g. "engram-named-checkpoints") so the user can later list-and-pick rather than scanning timestamps. This is the lifeline if the context window fills before compaction runs.',
     inputSchema: z.object({
       currentTask: z.string().describe('One-sentence description of what you are working on.'),
+      name: z.string().optional().describe('Human-friendly checkpoint name (kebab-case recommended) for list-and-pick resume. Optional — omit for an unnamed timestamped handoff.'),
       reason: z.enum(['compact', 'session-end', 'manual', 'context-pressure']).optional().describe('Why this handoff is being written (default: manual).'),
       sessionId: z.string().optional().describe('Session/conversation ID for cross-referencing.'),
       completed: z.string().optional().describe('Comma-separated list of what has been completed this session.'),
@@ -970,9 +971,10 @@ server.registerTool(
       notes: z.string().optional().describe('Free-form additional context, quirks, gotchas.'),
     }),
   },
-  async ({ currentTask, reason, sessionId, completed, nextSteps, openQuestions, fileRefs, decisions, notes }) => {
+  async ({ currentTask, name, reason, sessionId, completed, nextSteps, openQuestions, fileRefs, decisions, notes }) => {
     const splitCsv = (s?: string) => s ? s.split(',').map(x => x.trim()).filter(Boolean) : [];
     const note = writeHandoff(config.dataDir, {
+      ...(name ? { name } : {}),
       sessionId: sessionId ?? null,
       reason: reason ?? 'manual',
       currentTask,
@@ -986,6 +988,7 @@ server.registerTool(
     return json({
       written: true,
       timestamp: note.timestamp,
+      name: note.name,
       reason: note.reason,
       summary: note.currentTask,
     });
@@ -996,22 +999,43 @@ server.registerTool(
   'memory_handoff_read',
   {
     title: 'Read Handoff Note',
-    description: 'Read the most recent handoff note (or a specific one by stamp). Call this at the start of every session to resume where the last one left off. Set list=true to get recent handoff stamps instead of a single note.',
+    description: 'Read a saved handoff/checkpoint. With no arg, returns the most recent. Pass `name` to load a named checkpoint, or `stamp` to load a specific timestamp. Set `list=true` to get recent checkpoints (deprecated — prefer memory_handoff_list).',
     inputSchema: z.object({
-      stamp: z.string().optional().describe('Handoff stamp to load (e.g. "2026-04-20_14-32-05"). If omitted, returns the latest.'),
-      list: z.boolean().optional().describe('If true, list recent handoff stamps instead of loading a note.'),
-      limit: z.number().min(1).max(50).optional().describe('For list mode: max stamps to return (default 10).'),
+      name: z.string().optional().describe('Named checkpoint to load (e.g. "engram-named-checkpoints"). Takes precedence over stamp if both are provided.'),
+      stamp: z.string().optional().describe('Handoff stamp to load (e.g. "2026-04-20_14-32-05"). If omitted and no name, returns the latest.'),
+      list: z.boolean().optional().describe('Deprecated — use memory_handoff_list. If true, lists recent checkpoints.'),
+      limit: z.number().min(1).max(50).optional().describe('For list mode: max entries to return (default 10).'),
     }),
   },
-  async ({ stamp, list, limit }) => {
+  async ({ name, stamp, list, limit }) => {
     if (list) {
       return json({ handoffs: listHandoffs(config.dataDir, limit ?? 10) });
     }
-    const note = readHandoff(config.dataDir, stamp);
+    const note = readHandoff(config.dataDir, name ?? stamp);
     if (!note) {
-      return json({ found: false, message: 'No handoff note available.' });
+      const identifier = name ?? stamp;
+      return json({
+        found: false,
+        message: identifier
+          ? `No handoff found matching "${identifier}". Use memory_handoff_list to see saved checkpoints.`
+          : 'No handoff note available.',
+      });
     }
     return json({ found: true, ...note });
+  }
+);
+
+server.registerTool(
+  'memory_handoff_list',
+  {
+    title: 'List Handoff Checkpoints',
+    description: 'List recent saved handoffs/checkpoints, newest first. Each entry includes stamp, timestamp, reason, currentTask snippet, and (if set) the user-facing name. Call this when the user asks to "resume" or "pick up where we left off" so you can present options before loading one with memory_handoff_read.',
+    inputSchema: z.object({
+      limit: z.number().min(1).max(50).optional().describe('Max checkpoints to return (default 10, max 50).'),
+    }),
+  },
+  async ({ limit }) => {
+    return json({ handoffs: listHandoffs(config.dataDir, limit ?? 10) });
   }
 );
 
