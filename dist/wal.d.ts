@@ -48,8 +48,8 @@ export interface IngestEntry {
      * wal.ts), which is why its wall-clock is ~50× faster than Pyre's
      * MCP-boundary bench on the same dataset.
      *
-     * Real users keep KG extraction (it powers memory_dossier,
-     * memory_kg_query, graph rerank). Benchmark harnesses comparing
+     * Real users keep KG extraction (it powers engram-dossier,
+     * engram-kg-query, graph rerank). Benchmark harnesses comparing
      * apples-to-apples vs the standalone bench should pass this flag
      * so they're measuring the same code path.
      */

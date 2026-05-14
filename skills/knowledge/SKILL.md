@@ -26,16 +26,16 @@ Explore and manage the knowledge graph.
 ## Behavior
 
 ### timeline
-Call `memory_kg_timeline` for the entity. Present results chronologically with valid-from/valid-to dates. Show both current and historical facts so the user can see how things changed over time.
+Call `engram-kg-timeline` for the entity. Present results chronologically with valid-from/valid-to dates. Show both current and historical facts so the user can see how things changed over time.
 
 ### about
-Call `memory_kg_query` filtered to the entity as subject. Show all currently valid triples in a readable format. Group by predicate type if there are many.
+Call `engram-kg-query` filtered to the entity as subject. Show all currently valid triples in a readable format. Group by predicate type if there are many.
 
 ### add
-Call `memory_kg_add` with the triple. Confirm what was added. If the fact contradicts an existing one (e.g., user already "works-at" somewhere else), ask if the old fact should be invalidated.
+Call `engram-kg-add` with the triple. Confirm what was added. If the fact contradicts an existing one (e.g., user already "works-at" somewhere else), ask if the old fact should be invalidated.
 
 ### correct
-Search for existing triples matching the subject and predicate. Show them. Ask the user what the correct value is. Invalidate the old triple with `memory_kg_invalidate` and add the new one with `memory_kg_add`.
+Search for existing triples matching the subject and predicate. Show them. Ask the user what the correct value is. Invalidate the old triple with `engram-kg-invalidate` and add the new one with `engram-kg-add`.
 
 ### stats
-Call `memory_kg_stats`. Show entity count, triple count, active vs invalidated, and most connected entities.
+Call `engram-kg-stats`. Show entity count, triple count, active vs invalidated, and most connected entities.

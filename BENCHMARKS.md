@@ -154,7 +154,7 @@ npm run bench:throughput -- --batch 100               # larger ingest batch
 
 ## Query latency
 
-**What it measures.** Wall-clock around `search()` — the same call path that `memory_search` uses at the MCP boundary. The corpus is pre-seeded with N synthetic chunks, then M queries run sequentially. Top-K = 10 by default.
+**What it measures.** Wall-clock around `search()` — the same call path that `engram-search` uses at the MCP boundary. The corpus is pre-seeded with N synthetic chunks, then M queries run sequentially. Top-K = 10 by default.
 
 **Query buckets.** Latency varies with query length, so we report per-bucket percentiles:
 - `short` — 1–3 word keyword queries

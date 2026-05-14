@@ -1,5 +1,5 @@
 /**
- * memory_update_metadata tests — pure-logic + storage round-trip.
+ * engram-update-metadata tests — pure-logic + storage round-trip.
  *
  * The pure helper `buildUpdateMetadataPatch` covers merge vs. replace
  * semantics without spinning up LanceDB. The storage round-trip cases

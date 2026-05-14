@@ -26,7 +26,7 @@ Switch between memory backends for the current session.
 When the user invokes this command:
 
 1. Announce the mode change clearly
-2. For `engram` mode: use only `memory_search`, `memory_ingest`, `memory_format`, and other Engram MCP tools for all memory operations. Do not write to native memory systems.
+2. For `engram` mode: use only `engram-search`, `engram-ingest`, `engram-format`, and other Engram MCP tools for all memory operations. Do not write to native memory systems.
 3. For `off` mode: do not call any memory tools (Engram or native) for the rest of the session. Do not store anything. If the user asks you to remember something, remind them memory is off and ask if they want to switch.
 4. For `hybrid` mode: use Engram for structured memory (search, ingest, rules, knowledge graph) and let native client memory do its thing alongside.
 
