@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Cloud login from MCP.** Four new tools let any MCP client authenticate with Pyre Cloud without dropping to a terminal:
+  - `memory_login({ serverUrl, label? })` — starts a device-code pairing and returns the verification URL + user code.
+  - `memory_login_resume({ serverUrl, deviceCode, intervalSeconds, expiresAt })` — polls for ~45s, returns `approved` / `pending` / `denied` / `expired`. Writes `~/.pyre/credentials.json` on approval.
+  - `memory_login_status()` — reads the local credentials file; returns `loggedIn`, `apiUrl`, `label`, `scopes`, `issuedAt`.
+  - `memory_logout()` — idempotent credentials deletion.
+
+### Changed
+- Refactored `src/auth/login.ts` to export the device-code primitives (`startDeviceCode`, `pollDeviceCode`, `credentialsFromApproval`) so the CLI and MCP tools share the same code path. CLI behaviour is unchanged.
+
 ## [1.1.0] - 2026-05-14
 
 ### Added
