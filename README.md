@@ -299,24 +299,24 @@ For Pyre Cloud Pro users:
 
 ```bash
 npm install -g @onenomad/engram-mcp
-engram-mcp login https://getpyre.ai
+engram-mcp login https://pyre.sh
 ```
 
 `login` requires the pyre-web server URL. The binary ships with no hardcoded default — you point at whichever Pyre instance you're using (prod, staging, your own deployment). Three equivalent ways to supply it:
 
 ```bash
-engram-mcp login https://getpyre.ai          # positional argument
-engram-mcp login --server https://getpyre.ai # flag
-PYRE_API_URL=https://getpyre.ai engram-mcp login   # env var
+engram-mcp login https://pyre.sh          # positional argument
+engram-mcp login --server https://pyre.sh # flag
+PYRE_API_URL=https://pyre.sh engram-mcp login   # env var
 ```
 
 `login` opens that URL in your browser, shows you a one-time pairing code, and waits for you to approve the device. On approval it writes `~/.pyre/credentials.json` (mode 0600) using the canonical `api_url` from the server's response — which may differ from the login URL you typed if the server normalises or redirects. From that point on Engram automatically routes through your cloud Engram instance. Local data stays local; nothing changes for users who don't run `login`.
 
 ```
-$ engram-mcp login https://getpyre.ai
+$ engram-mcp login https://pyre.sh
 Open this URL in your browser to authorize:
 
-  https://getpyre.ai/connect
+  https://pyre.sh/connect
 
 Enter this code when prompted: PYRE-7K4M-9N2X
 (waiting for approval — Ctrl+C to cancel)
@@ -341,7 +341,7 @@ There's no terminal to open a browser from in CI. Skip `login` and set the env v
 
 ```bash
 export STORAGE_BACKEND=cloud
-export PYRE_API_URL=https://getpyre.ai
+export PYRE_API_URL=https://pyre.sh
 export PYRE_API_KEY=sk_pyre_xxx
 ```
 
