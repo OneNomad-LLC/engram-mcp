@@ -29,7 +29,7 @@ function withTempPath<T>(fn: (path: string, dir: string) => T): T {
 }
 
 const validCreds: Credentials = {
-  api_url: 'https://pyre-web-dev.up.railway.app',
+  api_url: 'https://dev.pyre.sh',
   api_key: 'sk_pyre_test_abcdef',
   label: 'Matt — laptop',
   scopes: ['engram:read', 'engram:write', 'persona:read', 'persona:write'],
