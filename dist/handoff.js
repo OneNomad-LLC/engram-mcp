@@ -39,29 +39,47 @@ export function writeHandoff(dataDir, note) {
     return full;
 }
 /**
- * Read the most recent handoff, or a specific one by stamp.
+ * Read the most recent handoff, or a specific one by stamp or name.
+ *
+ * Identifier resolution order:
+ *   1. No identifier → latest timestamped handoff
+ *   2. Identifier matches stamp regex → load by stamp
+ *   3. Otherwise → scan handoff JSONs for `name` field match (newest match wins)
  */
 // Timestamped handoff filenames look like "2026-04-22_14-32-05-123Z" (what
 // stampFilename() produces). The rolling `session-checkpoint.json` written
 // by engram_stop_hook.sh does NOT match this shape, so it won't shadow real
 // handoffs when readHandoff() picks the latest.
 const STAMP_RE = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/;
-export function readHandoff(dataDir, stamp) {
+export function readHandoff(dataDir, identifier) {
     const dir = handoffDir(dataDir);
     if (!existsSync(dir))
         return null;
-    let targetStamp = stamp;
-    if (!targetStamp) {
+    if (!identifier) {
         const allJson = readdirSync(dir).filter(f => f.endsWith('.json'));
         const timestamped = allJson.filter(f => STAMP_RE.test(f)).sort().reverse();
-        // Prefer an explicitly-written, timestamped handoff; fall back to any
-        // other .json (e.g. the rolling session checkpoint) only if none exist.
         const pick = timestamped[0] ?? allJson.sort().reverse()[0];
         if (!pick)
             return null;
-        targetStamp = pick.replace(/\.json$/, '');
+        return loadHandoffFile(handoffJsonPath(dataDir, pick.replace(/\.json$/, '')));
     }
-    const path = handoffJsonPath(dataDir, targetStamp);
+    if (STAMP_RE.test(identifier)) {
+        return loadHandoffFile(handoffJsonPath(dataDir, identifier));
+    }
+    // Name lookup — scan newest first, return first hit.
+    const stamps = readdirSync(dir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace(/\.json$/, ''))
+        .sort()
+        .reverse();
+    for (const stamp of stamps) {
+        const note = loadHandoffFile(handoffJsonPath(dataDir, stamp));
+        if (note?.name === identifier)
+            return note;
+    }
+    return null;
+}
+function loadHandoffFile(path) {
     if (!existsSync(path))
         return null;
     try {
@@ -72,7 +90,8 @@ export function readHandoff(dataDir, stamp) {
     }
 }
 /**
- * List handoff stamps, newest first.
+ * List handoff checkpoints, newest first. Includes the optional `name` so a
+ * caller can present a list-and-pick UI keyed on either stamp or name.
  */
 export function listHandoffs(dataDir, limit = 10) {
     const dir = handoffDir(dataDir);
@@ -93,6 +112,7 @@ export function listHandoffs(dataDir, limit = 10) {
                 timestamp: note.timestamp,
                 reason: note.reason,
                 currentTask: note.currentTask,
+                ...(note.name ? { name: note.name } : {}),
             });
         }
         catch {
@@ -103,9 +123,11 @@ export function listHandoffs(dataDir, limit = 10) {
 }
 function formatHandoffMarkdown(note) {
     const lines = [
-        `# Handoff — ${note.timestamp}`,
+        `# Handoff — ${note.name ?? note.timestamp}`,
         '',
+        note.name ? `**Name:** ${note.name}` : '',
         `**Reason:** ${note.reason}`,
+        `**Timestamp:** ${note.timestamp}`,
         note.sessionId ? `**Session:** ${note.sessionId}` : '',
         '',
         '## Current Task',
