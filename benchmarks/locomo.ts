@@ -23,6 +23,11 @@
  *   npm run bench:locomo -- --verbose          # per-question output
  */
 
+// CRITICAL: force local file backend. Without this, src/storage-factory.ts
+// auto-routes Storage to Pyre Cloud whenever ~/.pyre/credentials.json exists,
+// silently ignoring the temp dataDir we pass. See task #44.
+process.env.STORAGE_BACKEND = 'file';
+
 import { readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';

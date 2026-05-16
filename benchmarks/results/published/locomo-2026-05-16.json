@@ -1,0 +1,96 @@
+{
+  "version": "2.4.0",
+  "commit": "5199bcf",
+  "ranAt": "2026-05-16T18:40:24.419Z",
+  "benchmark": "locomo",
+  "durationMs": 546488,
+  "config": {
+    "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+    "useRerank": false,
+    "topK": 10,
+    "questionLimit": null,
+    "conversations": 10
+  },
+  "results": {
+    "recall@5": 0.8549848942598187,
+    "recall@10": 0.919436052366566,
+    "latencyMs": {
+      "p50": 188,
+      "p95": 333,
+      "p99": 448,
+      "avg": 202.4,
+      "min": 92,
+      "max": 770
+    },
+    "questions": 1986,
+    "hits5": 1698,
+    "hits10": 1826
+  },
+  "perCategory": {
+    "temporal": {
+      "n": 321,
+      "recall@5": 0.8535825545171339,
+      "recall@10": 0.9314641744548287,
+      "latencyMs": {
+        "p50": 167,
+        "p95": 234,
+        "p99": 299,
+        "avg": 171.5,
+        "min": 92,
+        "max": 644
+      }
+    },
+    "temporal-inference": {
+      "n": 96,
+      "recall@5": 0.6041666666666666,
+      "recall@10": 0.7083333333333334,
+      "latencyMs": {
+        "p50": 166,
+        "p95": 259,
+        "p99": 318,
+        "avg": 170.2,
+        "min": 99,
+        "max": 318
+      }
+    },
+    "single-hop": {
+      "n": 282,
+      "recall@5": 0.8049645390070922,
+      "recall@10": 0.875886524822695,
+      "latencyMs": {
+        "p50": 167,
+        "p95": 247,
+        "p99": 323,
+        "avg": 172.8,
+        "min": 101,
+        "max": 330
+      }
+    },
+    "open-domain": {
+      "n": 841,
+      "recall@5": 0.8870392390011891,
+      "recall@10": 0.9476813317479191,
+      "latencyMs": {
+        "p50": 192,
+        "p95": 302,
+        "p99": 403,
+        "avg": 202.6,
+        "min": 95,
+        "max": 437
+      }
+    },
+    "adversarial": {
+      "n": 446,
+      "recall@5": 0.8811659192825112,
+      "recall@10": 0.9304932735426009,
+      "latencyMs": {
+        "p50": 229,
+        "p95": 427,
+        "p99": 611,
+        "avg": 249.8,
+        "min": 96,
+        "max": 770
+      }
+    }
+  }
+}

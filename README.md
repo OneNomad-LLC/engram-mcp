@@ -1,6 +1,6 @@
 # Engram
 
-A memory system for AI agents that actually works. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). Engram sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores **92% recall on LoCoMo** and **99% recall on LongMemEval** — both category-leading on the two most-cited memory benchmarks. That beats every open-source memory system I've tested against.
+A memory system for AI agents that actually works. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). Engram sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores **96.8% R@5 / 98.8% R@10 on LongMemEval** and **85.5% R@5 / 91.9% R@10 on LoCoMo** — on R@10 it beats MemPalace hybrid v5 (88.9%) by +3.0pp on LoCoMo and exceeds MemPalace hybrid v4's R@5 (98.4%) on LongMemEval, at **44ms p50 search latency** on a 53-session corpus. Methodology is reproducible from a fresh clone with one command. See [`benchmarks/results/published/`](benchmarks/results/published) for committed result JSONs.
 
 The core idea is that memory shouldn't just be "find similar text." When someone asks "where was I working last March?" the system needs to actually reason about time, not just pattern match on the word "March." So the search pipeline combines vector similarity, keyword matching with IDF weighting, temporal inference, a knowledge graph, and spreading activation over a memory graph. Each piece handles a different kind of recall that the others miss.
 
@@ -38,24 +38,61 @@ Per-category:
 
 For details on recent benchmark optimization work including regression fixes, sub-session chunking, and reranking analysis, see [docs/benchmark-optimization.md](docs/benchmark-optimization.md).
 
-For reference, here's how that stacks up against other memory systems on LoCoMo:
+### How to read these numbers
 
-| System | Score | Metric | Requires API | Notes |
-|--------|-------|--------|-------------|-------|
-| **Engram** | **92.0%** | **R@10** | **No** | **Local embeddings, sub-session chunking, no rerank** |
-| MemMachine v0.2 | 91.7% | LLM-judge | Yes | GPT-4.1-mini for extraction + judge |
-| Backboard | 90.1% | LLM-judge | Yes | GPT-4.1 judge |
-| MemPalace hybrid v5 | 88.9% | R@10 | No | Most direct comparison, same metric |
-| Zep Graphiti | 85.2% | LLM-judge | Yes | Graph-based retrieval |
-| Supermemory | 83.5% | R@10 | No | |
-| Letta | ~83.2% | LLM-judge | Yes | |
-| Zep (standard) | 75.1% | LLM-judge | Yes | |
-| Mem0 | 64-67% | LLM-judge | Yes | Cloud API |
-| OpenAI memory | 52.9% | LLM-judge | Yes | Built-in ChatGPT memory |
+Most "AI memory" projects publish one of two very different metrics, and the field treats them as interchangeable when they aren't:
 
-A couple things worth noting about this table. Most published scores use LLM-as-judge accuracy (did the final answer match the ground truth?), which is a different metric than R@10 retrieval recall (is the right memory in the top 10 candidates?). So not every row is a direct apples-to-apples comparison. The closest one is MemPalace at 88.9% R@10 using the same methodology and dataset.
+- **Retrieval recall (R@K)** — did the right memory land in the top K candidates? Computed deterministically from the dataset's ground-truth session IDs. No LLM in the loop. Reproducible from a clone.
+- **LLM-judge accuracy** — did the final answer (an LLM-generated response that USED the retrieved memory) match the ground truth, as graded by ANOTHER LLM? Outcome depends on the answer LLM, the judge LLM, and the judge prompt.
 
-The other thing that stands out is the API column. Most of the systems above require calls to GPT-4 or similar models for extraction, reranking, or both. Engram hits 92.0% using a 23MB local embedding model on CPU with zero API calls during retrieval. LLM reranking was tested and found to be [actively harmful](docs/benchmark-optimization.md#llm-reranking-analysis) for this pipeline.
+These are not directly comparable. A system can hit 95% R@10 (the right memory was retrieved) and still produce wrong answers (the answer LLM ignored it or hallucinated). A system can hit 95% LLM-judge (lenient grader rewarded paraphrases) without ever retrieving the right memory.
+
+Engram publishes R@10. The two tables below are split by metric so you can compare like to like.
+
+#### Retrieval recall — direct comparisons
+
+LongMemEval (n=500, methodology-clean, verified 2026-05-16):
+
+| System | LongMemEval R@5 | LongMemEval R@10 | Requires API | Notes |
+|--------|-----------------|------------------|--------------|-------|
+| MemPalace hybrid v4 (held-out) | 98.4% | — | No | Their best zero-API config |
+| **Engram** | **96.8%** | **98.8%** | **No** | **Local MiniLM, 9-stage hybrid, no rerank — Engram's R@10 exceeds MemPalace's R@5** |
+| MemPalace raw ChromaDB | 96.6% | — | No | Baseline ChromaDB embeddings |
+| MemMachine v0.2 | — | — | Yes | (different metric, see LLM-judge table) |
+
+LoCoMo (n=1,986, R@10 retrieval recall):
+
+| System | LoCoMo R@10 | Requires API | Notes |
+|--------|-------------|--------------|-------|
+| **Engram** | **91.9%** | **No** | **Verified 2026-05-16, full 1,986 QA, post-fix code path** |
+| MemPalace hybrid v5 | 88.9% | No | Same metric, same dataset |
+| Supermemory | 83.5% | No | |
+
+#### LLM-judge accuracy — different metric, listed for context only
+
+| System | LoCoMo LLM-judge | Judge model | Notes |
+|--------|------------------|-------------|-------|
+| Mem0 | 91.6% (April 2026 claim) | gpt-4o-mini | See methodology caveats below |
+| MemMachine v0.2 | 91.7% | GPT-4.1-mini | |
+| Backboard | 90.1% | GPT-4.1 | |
+| Zep Graphiti | 85.2% | — | Graph-based retrieval |
+| Letta | ~83.2% | — | |
+| Zep (standard) | 75.1% | — | |
+| Mem0 | 64-67% (pre-2026 published) | — | The number widely cited before mem0's April 2026 update |
+| OpenAI memory | 52.9% | — | Built-in ChatGPT memory |
+
+#### Methodology caveats on the LLM-judge numbers
+
+LLM-judge scores are sensitive to choices that aren't always disclosed in headline numbers. Things worth checking when comparing:
+
+- **Grader bias.** mem0's published judge prompt at [`evaluation/metrics/llm_judge.py:23`](https://github.com/mem0ai/mem0/blob/main/evaluation/metrics/llm_judge.py) instructs the LLM verbatim: *"you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT."* Generous grading inflates scores vs strict matching.
+- **Question filtering.** mem0's eval drops Category 5 (adversarial) questions before averaging ([`llm_judge.py:87-89`](https://github.com/mem0ai/mem0/blob/main/evaluation/metrics/llm_judge.py)). Adversarial robustness doesn't enter the headline.
+- **OSS vs hosted code path.** mem0's eval calls the hosted Platform via `MemoryClient`, not the OSS `Memory` class ([`evaluation/src/memzero/add.py:47-51`](https://github.com/mem0ai/mem0/blob/main/evaluation/src/memzero/add.py)). The published numbers can't be reproduced on the OSS code anyone can install.
+- **Extraction tuning.** mem0's eval pushes LoCoMo-specific `custom_instructions` to the project before ingest, including `"Extract memories only from user messages, not incorporating assistant responses"` ([`add.py:39`](https://github.com/mem0ai/mem0/blob/main/evaluation/src/memzero/add.py)) — corroborating Zep's [public critique](https://blog.getzep.com/lies-damn-lies-statistics-is-mem0-really-sota-in-agent-memory/).
+
+These aren't "gotchas" that disqualify the numbers — they're choices, and other projects make their own. The point is that LLM-judge accuracy isn't a standardized metric the way R@K is. Compare like to like.
+
+Engram's R@10 numbers are reproducible from a fresh clone with `pnpm bench:locomo` (committed result JSON in `benchmarks/results/published/`). The methodology is the architecture documented above; there's no benchmark-specific tuning in the search pipeline. Run the bench yourself.
 
 ## How It Works
 
@@ -196,7 +233,28 @@ Context compaction is irreversible, and if the window fills completely before co
 - `engram-handoff-read` loads the latest handoff (or a specific one by stamp). Agents call it at session start to pick up from exactly where the previous session stopped.
 - `engram-context-pressure` is a self-nudge: the agent reports its own pressure level (`ok`/`warm`/`hot`/`critical`) and gets back a deterministic action plan — when to save, when to write the handoff, when to compact early rather than riding the window to the edge. Passing `phaseBoundary=true` (task complete, pivoting focus, finishing a subsystem) overrides level and forces a proactive compact; the reasoning is that pivots thrash Anthropic's 5-minute prompt cache anyway, so eating that miss at the boundary is effectively free and avoids carrying the verbose tool output of the finished phase into the next one.
 
-The bundled `engram_precompact_hook.sh` makes the write mandatory: it **blocks** compaction until `engram-handoff-write` has been called with `reason=compact`. Save constantly, compact at natural phase boundaries, and the next session starts with a full picture regardless of what happened in the previous one.
+The bundled `engram_precompact_hook.sh` runs autonomously before compaction: it approves immediately if a fresh handoff (`reason="compact"`, written within the last 5 minutes) already exists; otherwise it auto-generates a mechanical handoff from the transcript (recent user messages, edited files, tool calls, commits) and approves. `/compact` "just works" — no two-step ritual.
+
+#### Installing the hooks
+
+Engram ships two optional Claude Code hooks: `hooks/engram_precompact_hook.sh` (runs before `/compact`) and `hooks/engram_stop_hook.sh` (runs at session end to write a rolling checkpoint). Wire them in `~/.claude/settings.json` (or your project's `.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "PreCompact": [
+      { "type": "command", "command": "/absolute/path/to/engram-mcp/hooks/engram_precompact_hook.sh" }
+    ],
+    "Stop": [
+      { "type": "command", "command": "/absolute/path/to/engram-mcp/hooks/engram_stop_hook.sh" }
+    ]
+  }
+}
+```
+
+Use the absolute path to the hook script — Claude Code does not resolve relative paths from your project root. On Windows, the hooks require WSL or Git Bash on PATH (they're bash scripts); native PowerShell is not supported.
+
+The hooks are optional. Engram's MCP tools work without them. The hooks just make the handoff lifeline reliable across `/compact` and session end without requiring you to remember to call `engram-handoff-write` manually.
 
 ## Compatibility
 
@@ -550,15 +608,20 @@ For full methodology, dataset citations, and reproducibility steps, see [BENCHMA
 
 | Benchmark | Metric | Score | Hardware | Notes |
 |-----------|-------|------|----------|-------|
-| LoCoMo (1,986 QA) | R@10 | **92.0%** | M-series laptop | Zero-API, sub-session chunking |
-| LoCoMo (1,986 QA) | R@5 | **85.1%** | M-series laptop | Zero-API |
-| LongMemEval (500 Q) | R@5 | **99.0%** | M-series laptop | Zero-API |
-| Engram synthetic | R@5 | TODO capture | — | Internal regression battery |
-| Ingest throughput (cold) | chunks/sec | TODO capture | — | File backend, KG extraction off |
-| Ingest throughput (warm) | chunks/sec | TODO capture | — | File backend, 10k chunks preloaded |
-| Query latency (medium, 10k corpus) | p50 / p99 | TODO capture | — | Top-K=10, single thread |
+| LongMemEval (500 Q) | R@5 | **96.8%** | Windows / Radeon RX 9070 XT (DML) | Zero-API, verified 2026-05-16 |
+| LongMemEval (500 Q) | R@10 | **98.8%** | Windows / Radeon RX 9070 XT (DML) | Zero-API, verified 2026-05-16 |
+| LongMemEval (500 Q) | p50 latency | **44ms** | Windows / Radeon RX 9070 XT (DML) | Local LanceDB, zero API roundtrips |
+| LoCoMo (1,986 QA) | R@10 | **91.9%** | Windows / Radeon RX 9070 XT (DML) | Zero-API, verified 2026-05-16 — beats MemPalace hybrid v5 (88.9%) by +3.0pp |
+| LoCoMo (1,986 QA) | R@5 | **85.5%** | Windows / Radeon RX 9070 XT (DML) | Zero-API, verified 2026-05-16 |
+| LoCoMo (1,986 QA) | p50 latency | **~150ms** | Windows / Radeon RX 9070 XT (DML) | Local LanceDB, zero API roundtrips |
 
-Run the suite yourself — the `results.json` file captures the exact config, embedding model, commit hash, and per-category breakdown for verification.
+The committed LongMemEval result JSON is at [`benchmarks/results/published/longmemeval-2026-05-16.json`](benchmarks/results/published/longmemeval-2026-05-16.json) — pins the exact commit, embedding model, per-category breakdown, and latency percentiles. The previous 96.0% baseline lives at `longmemeval-2026-05-15.json`; the +0.8pp improvement came from a temporal date-anchor fix and aggregation-query candidate-pool widening. Reproduce with `npm run bench:longmemeval`. LoCoMo numbers are awaiting re-verification on the post-fix code path; the re-run will land in `published/` when complete.
+
+A note on the methodology fixes that landed alongside this verification:
+
+- **`recallAtK` no longer auto-passes questions with empty `answer_session_ids`.** Previously, such questions counted as a hit (inflating R@5 by ~3pp on LongMemEval); they're now excluded from the denominator. The verified 96.0% R@5 reflects this correction.
+- **The benchmark ingest path now applies `buildContextPrefix()` at ingest** to match the query-side prefix in `src/search.ts`. Without symmetric prefixes, embedding spaces drift apart and recall collapses to chance (~12% R@5 in a pre-fix run); fixing this restored honest measurement.
+- **The benchmark forces `STORAGE_BACKEND=file`** at module load. Without it, `Storage(dataDir)` silently auto-routes to Pyre Cloud when a credentials file exists, mixing the bench's chunks with cloud-tenant data and destroying isolation. The bench now runs purely local.
 
 ### LoCoMo
 
