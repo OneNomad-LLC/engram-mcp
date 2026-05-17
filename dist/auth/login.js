@@ -41,15 +41,59 @@ export function resolveServerUrl(opts) {
 function sleepDefault(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+/**
+ * Validate a URL is safe to hand to a child process opener.
+ *
+ * SECURITY: the previous implementation passed the URL through
+ * `cmd /c start` on Windows, which re-parses arguments via cmd's
+ * built-in `start` command and treats `&`, `|`, `^`, `<`, `>` as
+ * shell metacharacters even when quoted. A hostile login server
+ * returning `verification_url: "https://x & calc.exe"` could RCE
+ * the developer's machine. Windows path now goes through rundll32
+ * + url.dll,FileProtocolHandler (no shell interpretation), and we
+ * validate the URL is well-formed http(s) before any spawn.
+ */
+function isSafeBrowserUrl(url) {
+    if (!url || typeof url !== 'string')
+        return false;
+    if (url.length > 2000)
+        return false;
+    let parsed;
+    try {
+        parsed = new URL(url);
+    }
+    catch {
+        return false;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+        return false;
+    // Reject control chars, quotes, and shell-significant chars that
+    // shouldn't appear in a real verification URL even though some
+    // are technically valid in URI syntax. Defense-in-depth — the
+    // launcher choices below already avoid shell interpretation.
+    if (/[\x00-\x1f\x7f"<>|\\^`'\n\r]/.test(url))
+        return false;
+    return true;
+}
 function openInBrowser(url) {
+    if (!isSafeBrowserUrl(url)) {
+        process.stderr.write(`engram: refusing to open malformed URL\n`);
+        return;
+    }
     try {
         const p = platform();
         if (p === 'darwin') {
             spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
         }
         else if (p === 'win32') {
-            // The empty title arg matters — `start <url>` treats the URL as the title.
-            spawn('cmd', ['/c', 'start', '', url], { stdio: 'ignore', detached: true }).unref();
+            // Avoid `cmd /c start` -- its `start` builtin re-parses
+            // arguments and interprets shell metacharacters. rundll32 +
+            // FileProtocolHandler is the documented Windows API for
+            // opening a URL with no shell layer between us and ShellExecute.
+            spawn('rundll32.exe', ['url.dll,FileProtocolHandler', url], {
+                stdio: 'ignore',
+                detached: true,
+            }).unref();
         }
         else {
             spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();

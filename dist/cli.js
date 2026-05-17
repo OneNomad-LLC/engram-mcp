@@ -50,7 +50,7 @@ query options:
   --format json|text     output mode (default json)
 
 login options:
-  <server-url>           (required) pyre-web server URL, e.g. https://getpyre.ai
+  <server-url>           (required) pyre-web server URL, e.g. https://pyre.sh
   --server <url>         alternative to the positional arg
                          (PYRE_API_URL env var also works)
 

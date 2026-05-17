@@ -18,8 +18,11 @@ function handoffMdPath(dataDir, stamp) {
  */
 export function writeHandoff(dataDir, note) {
     const dir = handoffDir(dataDir);
+    // 0700 = owner-only access. Handoffs contain "where we left off"
+    // session context -- file refs, decisions, open questions. Not
+    // world-readable on shared systems.
     if (!existsSync(dir))
-        mkdirSync(dir, { recursive: true });
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
     const timestamp = new Date().toISOString();
     const full = { ...note, timestamp };
     const stamp = stampFilename();
@@ -50,19 +53,42 @@ export function writeHandoff(dataDir, note) {
 // stampFilename() produces). The rolling `session-checkpoint.json` written
 // by engram_stop_hook.sh does NOT match this shape, so it won't shadow real
 // handoffs when readHandoff() picks the latest.
-const STAMP_RE = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/;
+//
+// SECURITY: anchored at end with optional millisecond+timezone suffix.
+// An earlier version was unanchored, which allowed a `stamp` like
+// "2026-01-01_00-00-00/../../.pyre/credentials" to match and then be
+// joined into the file path -- arbitrary `.json` file read.
+const STAMP_RE = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+Z?)?$/;
+// Defense-in-depth path-safety check on any user-provided identifier
+// before it touches the filesystem. Even with STAMP_RE anchored, a
+// future change that loosens the regex shouldn't reopen the traversal.
+function isSafeHandoffIdentifier(identifier) {
+    if (!identifier)
+        return false;
+    if (identifier.length > 200)
+        return false;
+    if (identifier.includes('/') || identifier.includes('\\'))
+        return false;
+    if (identifier.includes('..'))
+        return false;
+    if (identifier.includes('\0'))
+        return false;
+    return true;
+}
 export function readHandoff(dataDir, identifier) {
     const dir = handoffDir(dataDir);
     if (!existsSync(dir))
         return null;
     if (!identifier) {
         const allJson = readdirSync(dir).filter(f => f.endsWith('.json'));
-        const timestamped = allJson.filter(f => STAMP_RE.test(f)).sort().reverse();
+        const timestamped = allJson.filter(f => STAMP_RE.test(f.replace(/\.json$/, ''))).sort().reverse();
         const pick = timestamped[0] ?? allJson.sort().reverse()[0];
         if (!pick)
             return null;
         return loadHandoffFile(handoffJsonPath(dataDir, pick.replace(/\.json$/, '')));
     }
+    if (!isSafeHandoffIdentifier(identifier))
+        return null;
     if (STAMP_RE.test(identifier)) {
         return loadHandoffFile(handoffJsonPath(dataDir, identifier));
     }

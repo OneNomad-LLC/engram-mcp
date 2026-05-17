@@ -8,6 +8,14 @@ import { createTrace, recordStage, endTrace, persistTrace, } from './retrieval-t
  */
 export async function search(config, storage, query, maxResults, filters) {
     const limit = maxResults ?? config.maxRecallChunks;
+    // Reference "now" for relative date parsing in extractQuerySignals
+    // ("N days/weeks/months ago"). Production callers leave this null and
+    // get Date.now() — what users expect when they say "yesterday" in a
+    // chat. Benchmarks override it with the latest dataset session date,
+    // because LongMemEval haystacks are dated from when conversations
+    // ORIGINALLY happened, not today; using Date.now() yields date ranges
+    // that don't exist in the haystack and the temporal pipeline misses.
+    const referenceDate = filters?.referenceDate;
     // Diagnostic trace: created when traces are enabled, threaded through
     // the pipeline so each stage records its candidate count, then
     // persisted in finally{} regardless of return path. Disabled by
@@ -41,7 +49,7 @@ export async function search(config, storage, query, maxResults, filters) {
         : undefined;
     const scored = new Map();
     // Pre-extract query signals for boosting
-    const querySignals = extractQuerySignals(query);
+    const querySignals = extractQuerySignals(query, referenceDate);
     const hasEntities = querySignals.entities.length > 0;
     // Build IDF weights for keyword scoring
     const idfWeights = buildIdfWeights(query, allChunks);
@@ -59,15 +67,46 @@ export async function search(config, storage, query, maxResults, filters) {
         // Fall back to keyword-only
     }
     if (queryEmbedding && queryEmbedding.length > 0) {
-        const vectorResults = await storage.vectorSearch(queryEmbedding, Math.min(limit * 5, 50), // Larger candidate pool
-        "tier != 'archive' AND consolidation_level != -1");
+        // Preference / recommendation queries ("any tips for X", "can you
+        // recommend Y") embed poorly against concrete session content.
+        // Widen the candidate pool and lower the similarity floor when we
+        // detect the pattern, so the relevant session has a chance to make
+        // it past the vector stage into keyword + bonus scoring.
+        //
+        // Env-tunable knobs for benchmark experiments (apply to ALL queries,
+        // overriding the per-pattern logic below):
+        //   ENGRAM_CANDIDATE_POOL_MULT  (default 5; preference path uses 15)
+        //   ENGRAM_SIMILARITY_FLOOR     (default 0.25; preference path uses 0.15)
+        //   ENGRAM_CANDIDATE_POOL_MAX   (default 50; preference path uses 150)
+        const envPoolMult = process.env.ENGRAM_CANDIDATE_POOL_MULT
+            ? parseFloat(process.env.ENGRAM_CANDIDATE_POOL_MULT) : null;
+        const envPoolMax = process.env.ENGRAM_CANDIDATE_POOL_MAX
+            ? parseInt(process.env.ENGRAM_CANDIDATE_POOL_MAX, 10) : null;
+        const envFloor = process.env.ENGRAM_SIMILARITY_FLOOR
+            ? parseFloat(process.env.ENGRAM_SIMILARITY_FLOOR) : null;
+        // Both preference and aggregation queries benefit from a wider
+        // candidate pool, but for different reasons:
+        //   - preference: query embeds far from concrete content
+        //   - aggregation: answer needs N chunks, not just the top match
+        // Aggregation gets a slightly tighter pool than preference (12x vs
+        // 15x) because the relevant chunks usually share clear entity
+        // overlap with the query, so we don't need to drag in as many
+        // low-similarity candidates.
+        const isPref = querySignals.isPreferenceQuery;
+        const isAgg = querySignals.isAggregationQuery;
+        const defaultMult = isPref ? 15 : isAgg ? 12 : 5;
+        const defaultMax = isPref ? 150 : isAgg ? 120 : 50;
+        const defaultFloor = isPref ? 0.15 : isAgg ? 0.18 : 0.25;
+        const candidatePool = Math.min(limit * (envPoolMult ?? defaultMult), envPoolMax ?? defaultMax);
+        const similarityFloor = envFloor ?? defaultFloor;
+        const vectorResults = await storage.vectorSearch(queryEmbedding, candidatePool, "tier != 'archive' AND consolidation_level != -1");
         let aboveFloor = 0;
         let belowFloor = 0;
         for (const { chunk, distance } of vectorResults) {
             if (allowedIds && !allowedIds.has(chunk.id))
                 continue;
             const similarity = 1 - distance;
-            if (similarity > 0.25) {
+            if (similarity > similarityFloor) {
                 scored.set(chunk.id, { chunk, score: similarity });
                 aboveFloor++;
             }
@@ -453,12 +492,15 @@ const MONTH_MAP = {
     july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
     jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
-function extractQuerySignals(query) {
+function extractQuerySignals(query, referenceDateMs) {
     const dates = [];
     const entities = [];
     const phrases = [];
     let isTemporalInference = false;
     let temporalRelation = null;
+    // "Now" for relative date parsing — caller may override with a dataset
+    // reference date for benchmarks where "today" is fictional.
+    const nowMs = referenceDateMs ?? Date.now();
     // ── Date extraction ────────────────────────────────────────────
     // ISO dates: 2025-12-15
     for (const m of query.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
@@ -480,18 +522,18 @@ function extractQuerySignals(query) {
             dates.push({ month: MONTH_MAP[m[1].toLowerCase()], raw: m[0] });
         }
     }
-    // Relative dates
+    // Relative dates — all anchored to nowMs (overridable for benchmarks)
     const lower = query.toLowerCase();
-    const now_date = new Date();
+    const now_date = new Date(nowMs);
     if (lower.includes('yesterday')) {
-        const d = new Date(Date.now() - 86_400_000);
+        const d = new Date(nowMs - 86_400_000);
         dates.push({ year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), raw: 'yesterday' });
     }
     if (lower.includes('today') || lower.includes('this morning') || lower.includes('tonight')) {
         dates.push({ year: now_date.getFullYear(), month: now_date.getMonth() + 1, day: now_date.getDate(), raw: 'today' });
     }
     if (lower.includes('last week')) {
-        const d = new Date(Date.now() - 7 * 86_400_000);
+        const d = new Date(nowMs - 7 * 86_400_000);
         dates.push({ year: d.getFullYear(), month: d.getMonth() + 1, raw: 'last week' });
     }
     if (lower.includes('last month')) {
@@ -507,11 +549,27 @@ function extractQuerySignals(query) {
     if (lower.includes('this year')) {
         dates.push({ year: now_date.getFullYear(), raw: 'this year' });
     }
-    // "N days/weeks/months ago"
+    // "N days/weeks/months ago" — anchored to nowMs
     for (const m of lower.matchAll(/(\d+)\s+(days?|weeks?|months?)\s+ago/g)) {
         const n = parseInt(m[1], 10);
         const unit = m[2].startsWith('day') ? 86_400_000 : m[2].startsWith('week') ? 7 * 86_400_000 : 30 * 86_400_000;
-        const d = new Date(Date.now() - n * unit);
+        const d = new Date(nowMs - n * unit);
+        dates.push({ year: d.getFullYear(), month: d.getMonth() + 1, day: unit === 86_400_000 ? d.getDate() : undefined, raw: m[0] });
+    }
+    // "a/an week/month/day ago" → 1 unit
+    for (const m of lower.matchAll(/\b(?:an?|one)\s+(day|week|month)\s+ago\b/g)) {
+        const unit = m[1] === 'day' ? 86_400_000 : m[1] === 'week' ? 7 * 86_400_000 : 30 * 86_400_000;
+        const d = new Date(nowMs - unit);
+        dates.push({ year: d.getFullYear(), month: d.getMonth() + 1, day: unit === 86_400_000 ? d.getDate() : undefined, raw: m[0] });
+    }
+    // "two/three/etc weeks/days/months ago"
+    const wordNums = {
+        two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    };
+    for (const m of lower.matchAll(/\b(two|three|four|five|six|seven|eight|nine|ten)\s+(days?|weeks?|months?)\s+ago\b/g)) {
+        const n = wordNums[m[1]];
+        const unit = m[2].startsWith('day') ? 86_400_000 : m[2].startsWith('week') ? 7 * 86_400_000 : 30 * 86_400_000;
+        const d = new Date(nowMs - n * unit);
         dates.push({ year: d.getFullYear(), month: d.getMonth() + 1, day: unit === 86_400_000 ? d.getDate() : undefined, raw: m[0] });
     }
     // ── Entity extraction (proper nouns) ───────────────────────────
@@ -552,18 +610,11 @@ function extractQuerySignals(query) {
             entities.push(candidate);
         }
     }
-    // Entity alias expansion: "Matt" also matches "Matthew", etc.
-    // Simple substring dedup -- if one entity is a prefix of another, keep both
-    const expandedEntities = [...entities];
-    for (const entity of entities) {
-        const lower = entity.toLowerCase();
-        // Common name shortenings
-        for (const chunk of []) { /* KG expansion would go here */ }
-        // For now, add case variations so entityBoost catches more
-        if (!expandedEntities.some(e => e.toLowerCase() === lower && e !== entity)) {
-            // Already have it
-        }
-    }
+    // Entity list passes through unchanged. Alias / KG expansion was
+    // scaffolded here but never implemented -- removed to avoid dead
+    // code that suggests behavior that doesn't exist. Real KG-driven
+    // entity expansion happens later in the pipeline (graph-rerank.ts).
+    const expandedEntities = entities;
     // ── Quoted phrase extraction ───────────────────────────────────
     for (const m of query.matchAll(/"([^"]+)"/g)) {
         if (m[1].length >= 3)
@@ -597,7 +648,34 @@ function extractQuerySignals(query) {
     if (dates.length > 0 && entities.length > 0) {
         isTemporalInference = true;
     }
-    return { dates, entities, phrases, isTemporalInference, temporalRelation };
+    // ── Preference / recommendation query detection ────────────────
+    // Pattern derived from LongMemEval single-session-preference category
+    // analysis (2026-05-15): 30/30 questions match one of three openers.
+    // These queries embed poorly against concrete session content, so
+    // the search pipeline widens its candidate pool when triggered.
+    const isPreferenceQuery = (/\b(?:can you|could you)\s+(?:recommend|suggest|propose)\b/i.test(query) ||
+        /\b(?:any|some|got any)\s+(?:tips?|advice|suggestions?|ideas?|recommendations?|thoughts?)\b/i.test(query) ||
+        /\b(?:i(?:'m|'ve| am| have)?\s+(?:been\s+)?(?:thinking|planning|wondering|considering|trying|deciding)|do you (?:have|think))\b/i.test(query) ||
+        /\b(?:what should i|what would you|how do i|how should i)\b/i.test(query));
+    // ── Aggregation query detection ────────────────────────────────
+    // "How many", "How long", "How often", "How much" patterns.
+    // These need MULTIPLE relevant chunks because the answer isn't in
+    // any single one — it's a count/duration/aggregation. Pattern from
+    // LongMemEval multi-session miss analysis (2026-05-15).
+    // Examples: "How many projects have I led?", "How many museums
+    // did I visit in December?", "How long have I been in my role?"
+    const isAggregationQuery = (/\b(?:how\s+(?:many|much|long|often|frequently))\b/i.test(query) ||
+        /\b(?:count|number)\s+of\b/i.test(query) ||
+        /\b(?:total|sum|average)\s+(?:number|amount|time)\b/i.test(query));
+    return {
+        dates,
+        entities,
+        phrases,
+        isTemporalInference,
+        temporalRelation,
+        isPreferenceQuery,
+        isAggregationQuery,
+    };
 }
 // ─────────────────────────────────────────────────────────────────────
 // BOOST FUNCTIONS
