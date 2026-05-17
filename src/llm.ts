@@ -71,14 +71,62 @@ export async function llmComplete(
 
 // ── Local Embeddings ────────────────────────────────────────────────
 
-let _extractor: any = null;
-let _extractorLoading: Promise<any> | null = null;
+// The transformers.js pipeline returns a callable feature-extraction
+// function. The library's TS types are messy so we keep `unknown` here
+// and narrow at the call site (only `embed()` calls it). Avoids `any`
+// in load-bearing module state.
+type ExtractorFn = (text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: ArrayLike<number> }>;
+
+let _extractor: ExtractorFn | null = null;
+let _extractorLoading: Promise<ExtractorFn> | null = null;
 
 function getDevice(): string {
   return process.env.ENGRAM_DEVICE ?? process.env.SMART_MEMORY_DEVICE ?? 'cpu';
 }
 
-async function getExtractor(): Promise<any> {
+/**
+ * Per-file progress reporter for the first-call HuggingFace download.
+ *
+ * The model download is ~23MB on first install and can take 10-30s on
+ * slow connections. Without progress feedback an MCP client sees the
+ * tool call as frozen and the user thinks the install is broken. We
+ * log at 25/50/75/100% thresholds per file -- enough liveness signal
+ * to stay calm, not enough to spam.
+ *
+ * `status === 'done'` fires both for completed downloads AND for files
+ * that were already cached (no actual download). We use it to
+ * differentiate the two cases in the user-visible log.
+ */
+function makeProgressReporter(): (progress: unknown) => void {
+  const announced = new Map<string, Set<number>>();
+  return (raw: unknown) => {
+    if (!raw || typeof raw !== 'object') return;
+    const p = raw as { status?: string; file?: string; progress?: number; total?: number };
+    if (!p.file) return;
+    if (p.status === 'progress' && typeof p.progress === 'number') {
+      const pct = Math.floor(p.progress);
+      for (const threshold of [25, 50, 75, 100]) {
+        if (pct >= threshold) {
+          let seen = announced.get(p.file);
+          if (!seen) {
+            seen = new Set();
+            announced.set(p.file, seen);
+          }
+          if (!seen.has(threshold)) {
+            seen.add(threshold);
+            const mb = p.total ? ` (${(p.total / 1_000_000).toFixed(1)}MB)` : '';
+            console.error(`Engram: downloading ${p.file}${mb} — ${threshold}%`);
+          }
+        }
+      }
+    } else if (p.status === 'done' && !announced.has(p.file)) {
+      // Cached-file path: progress events never fired, just a 'done'.
+      console.error(`Engram: ${p.file} (cached)`);
+    }
+  };
+}
+
+async function getExtractor(): Promise<ExtractorFn> {
   if (_extractor) return _extractor;
 
   if (!_extractorLoading) {
@@ -87,7 +135,10 @@ async function getExtractor(): Promise<any> {
       const modelName = process.env.ENGRAM_EMBEDDING_MODEL ?? process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2';
       const device = getDevice();
       console.error(`Engram: loading embedding model ${modelName} (device: ${device})...`);
-      _extractor = await pipeline('feature-extraction', modelName, { device } as any);
+      console.error(`Engram: first-time setup downloads ~23MB (one-time, then cached at ~/.cache/huggingface)`);
+      const progress_callback = makeProgressReporter();
+      const loaded = await pipeline('feature-extraction', modelName, { device, progress_callback } as never);
+      _extractor = loaded as unknown as ExtractorFn;
       console.error('Engram: embedding model ready');
       return _extractor;
     })();

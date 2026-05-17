@@ -8,6 +8,7 @@ export declare function search(config: SmartMemoryConfig, storage: Storage, quer
     domain?: string;
     topic?: string;
     tag?: string;
+    referenceDate?: number;
 }): Promise<SearchResult[]>;
 export declare function selectRelevant(config: SmartMemoryConfig, query: string, candidates: SearchResult[]): Promise<SearchResult[]>;
 /**

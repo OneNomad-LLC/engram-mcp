@@ -38,7 +38,9 @@ export function writeDiaryEntry(
   agent: string = 'claude'
 ): DiaryEntry {
   const dir = diaryDir(dataDir);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  // 0700 = owner-only access (defensive; umask still applies on
+  // existing dirs). Diary entries can include personal/work content.
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   const date = today();
   const time = now();

@@ -1,0 +1,121 @@
+{
+  "version": "2.4.0",
+  "commit": "5199bcf",
+  "ranAt": "2026-05-15T19:29:29.122Z",
+  "benchmark": "longmemeval",
+  "durationMs": 1130275,
+  "config": {
+    "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+    "useRerank": false,
+    "questionLimit": null
+  },
+  "results": {
+    "recall@5": 0.96,
+    "recall@10": 0.984,
+    "ndcg@5": 0.8581903201201838,
+    "ndcg@10": 0.8778551727412457,
+    "latencyMs": {
+      "p50": 58,
+      "p95": 82,
+      "p99": 99,
+      "avg": 60.1,
+      "min": 41,
+      "max": 118
+    },
+    "questions": 500,
+    "hits5": 480,
+    "hits10": 492
+  },
+  "perCategory": {
+    "single-session-user": {
+      "n": 70,
+      "recall@5": 0.9714285714285714,
+      "recall@10": 1,
+      "ndcg@5": 0.8675188644289483,
+      "ndcg@10": 0.8776962126320346,
+      "latencyMs": {
+        "p50": 52,
+        "p95": 74,
+        "p99": 80,
+        "avg": 53.8,
+        "min": 41,
+        "max": 80
+      }
+    },
+    "multi-session": {
+      "n": 133,
+      "recall@5": 0.9548872180451128,
+      "recall@10": 0.9924812030075187,
+      "ndcg@5": 0.8141031010868459,
+      "ndcg@10": 0.8540110169113846,
+      "latencyMs": {
+        "p50": 56,
+        "p95": 73,
+        "p99": 87,
+        "avg": 57.3,
+        "min": 44,
+        "max": 109
+      }
+    },
+    "single-session-preference": {
+      "n": 30,
+      "recall@5": 0.8333333333333334,
+      "recall@10": 0.9333333333333333,
+      "ndcg@5": 0.6867702628912227,
+      "ndcg@10": 0.7160755845012147,
+      "latencyMs": {
+        "p50": 56,
+        "p95": 78,
+        "p99": 80,
+        "avg": 58.3,
+        "min": 47,
+        "max": 80
+      }
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "recall@5": 0.9473684210526315,
+      "recall@10": 0.9624060150375939,
+      "ndcg@5": 0.8308697046233494,
+      "ndcg@10": 0.8484939629401315,
+      "latencyMs": {
+        "p50": 59,
+        "p95": 84,
+        "p99": 117,
+        "avg": 61.1,
+        "min": 44,
+        "max": 118
+      }
+    },
+    "knowledge-update": {
+      "n": 78,
+      "recall@5": 1,
+      "recall@10": 1,
+      "ndcg@5": 0.9356967756906809,
+      "ndcg@10": 0.9432489952704177,
+      "latencyMs": {
+        "p50": 59,
+        "p95": 83,
+        "p99": 90,
+        "avg": 60.8,
+        "min": 46,
+        "max": 90
+      }
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "recall@5": 1,
+      "recall@10": 1,
+      "ndcg@5": 1,
+      "ndcg@10": 1,
+      "latencyMs": {
+        "p50": 71,
+        "p95": 99,
+        "p99": 107,
+        "avg": 72.3,
+        "min": 56,
+        "max": 107
+      }
+    }
+  }
+}

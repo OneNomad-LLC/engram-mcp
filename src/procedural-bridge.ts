@@ -52,7 +52,8 @@ export function loadBridgeFile(): ProceduralInterchange {
 
 export function saveBridgeFile(data: ProceduralInterchange): void {
   const dir = dirname(BRIDGE_PATH);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  // 0700 owner-only (defensive). Bridge file mediates with Persona.
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
   data.lastUpdated = new Date().toISOString();
   writeFileSync(BRIDGE_PATH, JSON.stringify(data, null, 2), 'utf-8');
 }

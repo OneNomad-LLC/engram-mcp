@@ -27,8 +27,12 @@ export class FileStorageAdapter {
     constructor(dataDir) {
         this.dataDir = dataDir;
         this.dbPath = join(dataDir, 'lance');
+        // 0700 = owner-only access. Memory data may include sensitive
+        // chat history, decisions, personal facts -- it shouldn't be
+        // world-readable on shared/multi-user systems. Defensive only;
+        // umask still applies on existing dirs.
         if (!existsSync(dataDir))
-            mkdirSync(dataDir, { recursive: true });
+            mkdirSync(dataDir, { recursive: true, mode: 0o700 });
         this.ready = this.initAsync();
     }
     async initAsync() {
@@ -198,7 +202,10 @@ export class FileStorageAdapter {
         if (opts?.tag) {
             // Tags are stored as a JSON array string like ["a","b","c"]. Match the
             // wrapped form so "cortex:action" doesn't also hit "cortex:action_item".
-            conditions.push(`tags LIKE '%"${esc(opts.tag)}"%'`);
+            // SECURITY: use escLike to escape LIKE pattern wildcards (% and _) so
+            // a tag of "%" doesn't widen the match to every row. ESCAPE '\' tells
+            // DataFusion to treat backslash as the escape char.
+            conditions.push(`tags LIKE '%"${escLike(opts.tag)}"%' ESCAPE '\\'`);
         }
         if (conditions.length > 0) {
             q = q.where(conditions.join(' AND '));
@@ -442,8 +449,52 @@ export class FileStorageAdapter {
     }
 }
 // ── Helpers ──────────────────────────────────────────────────────────
+/**
+ * Escape a string value for inclusion in a single-quoted SQL string
+ * literal. The caller MUST wrap the result in single quotes:
+ *   `tier = '${esc(value)}'`
+ *
+ * Doubles single quotes (SQL standard) and rejects values containing
+ * NULL bytes (which would terminate the string in some drivers and
+ * could be used to truncate/inject filter clauses).
+ *
+ * For LIKE patterns where the value should match literally, use
+ * escLike() instead — it additionally escapes %, _, and \ which are
+ * pattern wildcards in DataFusion / SQL LIKE.
+ */
 function esc(val) {
+    if (val == null)
+        return '';
+    if (typeof val !== 'string') {
+        throw new TypeError(`esc() expected string, got ${typeof val}`);
+    }
+    if (val.indexOf('\0') !== -1) {
+        throw new Error('null byte not allowed in filter value');
+    }
     return val.replace(/'/g, "''");
+}
+/**
+ * Escape a string for safe interpolation into the LITERAL portion of a
+ * SQL LIKE pattern. Wildcards (%, _) and the escape char itself (\) are
+ * backslash-escaped so they match as plain text. Caller must add the
+ * surrounding pattern wildcards AND an ESCAPE '\' clause:
+ *
+ *   `name LIKE '%${escLike(value)}%' ESCAPE '\\'`
+ */
+function escLike(val) {
+    if (val == null)
+        return '';
+    if (typeof val !== 'string') {
+        throw new TypeError(`escLike() expected string, got ${typeof val}`);
+    }
+    if (val.indexOf('\0') !== -1) {
+        throw new Error('null byte not allowed in filter value');
+    }
+    return val
+        .replace(/\\/g, '\\\\')
+        .replace(/%/g, '\\%')
+        .replace(/_/g, '\\_')
+        .replace(/'/g, "''");
 }
 function chunkToRow(chunk) {
     return {

@@ -49,7 +49,8 @@ export function readSessionState(dataDir: string): SessionState {
  */
 export function writeSessionState(dataDir: string, state: SessionState): void {
   const dir = dirname(statePath(dataDir));
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  // 0700 owner-only (defensive — umask still applies on existing dirs).
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   state.updatedAt = new Date().toISOString();
   const md = formatSessionState(state);

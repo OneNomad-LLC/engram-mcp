@@ -24,6 +24,22 @@ export interface BenchmarkResultFile {
   durationMs: number;
   results: Record<string, unknown>;
   perCategory?: Record<string, Record<string, unknown>>;
+  /**
+   * Per-question breakdown. Optional because earlier bench versions
+   * didn't emit it; modern runs should populate it so we can analyze
+   * misses without re-running. Keep entries lean — id + type +
+   * pass/fail flags is enough; full chunk lists balloon the file.
+   */
+  perQuestion?: Array<{
+    questionId: string;
+    questionType: string;
+    questionPreview?: string;
+    recall5: number;
+    recall10: number;
+    latencyMs: number;
+    answerSessionIds?: string[];
+    retrievedSessionIds?: string[];
+  }>;
   notes?: string;
 }
 

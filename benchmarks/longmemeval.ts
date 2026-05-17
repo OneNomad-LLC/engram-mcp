@@ -22,12 +22,20 @@
  *   npm run bench:longmemeval -- --verbose          # per-question output
  */
 
+// CRITICAL: force the local file backend. Without this, src/storage-factory.ts
+// auto-routes Storage to Pyre Cloud whenever ~/.pyre/credentials.json exists,
+// silently ignoring the temp dataDir we pass in. That made the bench POST every
+// chunk to the live cloud tenant and pull mixed results from every prior run.
+process.env.STORAGE_BACKEND = 'file';
+
 import { readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { rm as fsRm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Storage } from '../src/storage.js';
 import { loadConfig } from '../src/config.js';
 import { embed, isLlmAvailable } from '../src/llm.js';
+import { buildContextPrefix } from '../src/utils.js';
 import { search, selectRelevant } from '../src/search.js';
 import type { SmartMemoryConfig, SearchResult } from '../src/types.js';
 import type { StoredChunk } from '../src/storage.js';
@@ -64,16 +72,47 @@ interface QuestionResult {
 // ── Metrics ─────────────────────────────────────────────────────────
 
 function recallAtK(retrieved: string[], relevant: string[], k: number): number {
-  if (relevant.length === 0) return 1;
+  // INTEGRITY: an earlier version returned 1 (auto-hit) when
+  // relevant.length === 0. That silently inflates the headline metric
+  // by the number of dataset questions with no answer_session_ids.
+  // The correct handling is to EXCLUDE such questions from the
+  // benchmark entirely (done at the question loop), not score them.
+  // Return 0 here as a defensive fallback in case an empty list ever
+  // reaches this function -- it should not.
+  if (relevant.length === 0) return 0;
   const topK = new Set(retrieved.slice(0, k));
   const found = relevant.filter(id => topK.has(id)).length;
   return found > 0 ? 1 : 0; // Binary recall: did we find ANY answer session in top K?
 }
 
+/**
+ * Dedupe a retrieved-session list while preserving first-rank order.
+ * Sub-session chunking means multiple chunks can map back to the same
+ * session ID, so the raw retrieved list contains duplicates. NDCG
+ * computed on the raw list yields values >1 (it counts the same hit
+ * multiple times). For metric correctness, dedupe by session before
+ * any rank-weighted calculation.
+ */
+function dedupeSessions(retrieved: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of retrieved) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
 function ndcgAtK(retrieved: string[], relevant: string[], k: number): number {
+  // Dedupe by session — sub-chunking causes the same session to appear
+  // multiple times in the retrieved list, which would otherwise let
+  // NDCG exceed 1. R@K uses a Set internally so it's unaffected.
+  const deduped = dedupeSessions(retrieved);
   const relevantSet = new Set(relevant);
   let dcg = 0;
-  const topK = retrieved.slice(0, k);
+  const topK = deduped.slice(0, k);
   for (let i = 0; i < topK.length; i++) {
     if (relevantSet.has(topK[i])) {
       dcg += 1 / Math.log2(i + 2);
@@ -122,6 +161,7 @@ async function main(): Promise<void> {
   // Process each question independently (like MemPalace does)
   const results: QuestionResult[] = [];
   const byType: Record<string, QuestionResult[]> = {};
+  let excludedCount = 0;
 
   // Warm up embedding model
   console.error('Warming up embedding model...');
@@ -131,9 +171,33 @@ async function main(): Promise<void> {
   for (let qi = 0; qi < dataset.length; qi++) {
     const entry = dataset[qi];
 
-    if (verbose || qi % 50 === 0) {
+    // INTEGRITY: questions whose dataset entry has no answer_session_ids
+    // cannot be scored honestly (there is no ground truth to recall
+    // against). Exclude them entirely rather than auto-scoring as a hit
+    // (the prior bug) or auto-scoring as a miss (also wrong). Track
+    // exclusions and surface in the result file so the published number
+    // is transparent about what it measures.
+    if (!Array.isArray(entry.answer_session_ids) || entry.answer_session_ids.length === 0) {
+      excludedCount++;
+      if (verbose) {
+        console.error(`  [SKIP] ${entry.question_id}: no answer_session_ids in dataset`);
+      }
+      continue;
+    }
+
+    if (verbose || qi % 50 === 0 || qi <= 2) {
       console.error(`[${qi + 1}/${dataset.length}] ${entry.question_type}: ${entry.question.slice(0, 60)}...`);
     }
+
+    // Yield to the event loop. After the previous iteration's storage
+    // goes out of scope, fire-and-forget background writes from
+    // search.ts (audit finding C5: unawaited recallCount updates) and
+    // LanceDB's internal connection cleanup may still be pending. A
+    // setImmediate yield lets those drain before we open a new LanceDB
+    // connection -- on Windows the two collide and stall.
+    await new Promise(resolve => setImmediate(resolve));
+
+    if (qi <= 2) console.error(`  [${qi + 1}] creating storage...`);
 
     // Create isolated storage for this question
     const benchDir = join(tmpdir(), `lme-bench-${Date.now()}-${qi}`);
@@ -146,16 +210,35 @@ async function main(): Promise<void> {
       maxRecallTokens: 50000, // Don't limit by tokens for benchmark
     };
 
+    if (qi <= 2) console.error(`  [${qi + 1}] connecting LanceDB...`);
     const storage = new Storage(benchDir);
     await storage.ensureReady();
+    if (qi <= 2) console.error(`  [${qi + 1}] storage ready, ingesting ${entry.haystack_sessions.length} sessions...`);
 
     // Ingest sessions as whole documents (same approach as MemPalace)
     const sessionIdMap = new Map<string, string>(); // chunkId -> sessionId
+    const ingestStart = performance.now();
+    const totalSessions = entry.haystack_sessions.length;
 
-    for (let si = 0; si < entry.haystack_sessions.length; si++) {
+    for (let si = 0; si < totalSessions; si++) {
       const session = entry.haystack_sessions[si];
       const sessionId = entry.haystack_session_ids[si];
       const sessionDate = entry.haystack_dates[si] ?? '';
+
+      // Liveness signal:
+      //   - every 5 sessions for question 1 (cold-start visibility)
+      //   - every 10 sessions in verbose mode
+      //   - every 25 sessions in default mode (less spammy but enough
+      //     to know the bench hasn't wedged inside a single question)
+      const shouldLog =
+        (qi === 0 && si > 0 && si % 5 === 0) ||
+        (verbose && si > 0 && si % 10 === 0) ||
+        (!verbose && si > 0 && si % 25 === 0);
+      if (shouldLog) {
+        const elapsedMs = performance.now() - ingestStart;
+        const rate = si / (elapsedMs / 1000);
+        console.error(`  ingesting [${si}/${totalSessions}] ${rate.toFixed(1)} sessions/sec`);
+      }
 
       // Concatenate session into a single document
       const sessionText = session
@@ -164,13 +247,23 @@ async function main(): Promise<void> {
 
       if (sessionText.length < 10) continue;
 
+      // Single atomic chunk per session — reverted from sub-chunking
+      // approach after 2026-05-15 full-500 run showed sub-chunking
+      // regressed overall recall from 96.0% to 93.6% (preference and
+      // temporal categories dropped most). Sub-chunks added noise
+      // candidates that crowded out the actual answer-session chunk
+      // for abstract / multi-aspect queries.
       const chunkId = randomUUID();
       sessionIdMap.set(chunkId, sessionId);
 
-      // Generate embedding
       let embedding: number[] | undefined;
       try {
-        embedding = await embed(config, sessionText.slice(0, 2000));
+        const prefix = buildContextPrefix({
+          type: 'context',
+          cognitiveLayer: 'episodic',
+          createdAt: sessionDate || new Date().toISOString(),
+        });
+        embedding = await embed(config, sessionText.slice(0, 2000), prefix);
       } catch {
         // Fall back to no embedding
       }
@@ -198,9 +291,48 @@ async function main(): Promise<void> {
       await storage.saveChunk(chunk);
     }
 
-    // Search
+    // Search — wrapped with hard timeout so a stuck pipeline can't
+    // wedge the entire benchmark run. The first question on a cold
+    // cache can take 5-15s; anything past 60s is a real bug worth
+    // surfacing (probably KG extraction or spreading activation
+    // looping on a pathological session).
+    if (qi === 0) {
+      console.error(`  search starting for question 1...`);
+    }
+    // Compute reference "now" from the latest haystack session date so
+    // "N days ago" queries anchor to the dataset's timeline rather than
+    // wall-clock today. Without this, temporal-reasoning queries miss
+    // because the computed date is years off. Falls back to Date.now()
+    // when the haystack has no usable dates.
+    let referenceDate: number | undefined;
+    try {
+      const haystackTimes = entry.haystack_dates
+        .map(d => Date.parse(d))
+        .filter((n): n is number => Number.isFinite(n));
+      if (haystackTimes.length > 0) {
+        referenceDate = Math.max(...haystackTimes);
+      }
+    } catch { /* fall back to Date.now() */ }
+
     const start = performance.now();
-    const searchResults = await search(config, storage, entry.question, 10);
+    const searchTimeoutMs = 60_000;
+    let searchResults: SearchResult[];
+    try {
+      searchResults = await Promise.race([
+        search(config, storage, entry.question, 10, referenceDate ? { referenceDate } : undefined),
+        new Promise<SearchResult[]>((_, reject) =>
+          setTimeout(() => reject(new Error(`search timeout after ${searchTimeoutMs}ms`)), searchTimeoutMs),
+        ),
+      ]);
+    } catch (err) {
+      console.error(`  [SEARCH FAIL] ${entry.question_id}: ${err instanceof Error ? err.message : String(err)}`);
+      // Skip this question rather than wedging the run.
+      try { rmSync(benchDir, { recursive: true, force: true }); } catch { /* noop */ }
+      continue;
+    }
+    if (qi === 0) {
+      console.error(`  search completed in ${(performance.now() - start).toFixed(0)}ms`);
+    }
 
     let selected: SearchResult[];
     if (useRerank && isLlmAvailable()) {
@@ -248,8 +380,37 @@ async function main(): Promise<void> {
       }
     }
 
-    // Cleanup
-    try { rmSync(benchDir, { recursive: true, force: true }); } catch { /* noop */ }
+    // Cleanup. On Windows LanceDB can hold file handles on the
+    // chunks table even after Storage falls out of scope, and the
+    // synchronous rmSync will block indefinitely waiting for the
+    // lock. Use async fs.rm with a 3-second timeout race -- if it
+    // can't clean up in 3s, leak the temp dir and move on. The OS
+    // will reclaim %TEMP% eventually.
+    if (qi === 0) console.error(`  cleanup...`);
+    const cleanupStart = performance.now();
+    try {
+      await Promise.race([
+        fsRm(benchDir, { recursive: true, force: true }),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error(`cleanup timeout`)), 3_000),
+        ),
+      ]);
+    } catch {
+      // Couldn't clean up in 3s. Don't block the run -- temp dir
+      // accumulation is annoying but not fatal for a bench.
+    }
+    if (qi === 0) console.error(`  cleanup done in ${(performance.now() - cleanupStart).toFixed(0)}ms`);
+
+    // Periodic progress so the run doesn't go silent for 50 questions
+    // at a stretch (the qi % 50 == 0 line at the top of the loop only
+    // fires on entry, before search). After every question, in non-
+    // verbose mode, emit one tight progress line.
+    if (!verbose && (qi + 1) % 10 === 0) {
+      const elapsed = (performance.now() - benchStart) / 1000;
+      const rate = (qi + 1) / elapsed;
+      const eta = (dataset.length - qi - 1) / rate;
+      console.error(`progress [${qi + 1}/${dataset.length}] ${rate.toFixed(2)} q/s — ETA ${(eta / 60).toFixed(1)}min`);
+    }
   }
 
   // ── Results ─────────────────────────────────────────────────────
@@ -287,6 +448,9 @@ async function main(): Promise<void> {
   console.log(`  Latency                        avg=${avgLatency.toFixed(0)}ms`);
   console.log(`  LLM rerank                     ${useRerank && isLlmAvailable() ? 'enabled' : 'disabled'}`);
   console.log(`  Embedding model                ${process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2'}`);
+  if (excludedCount > 0) {
+    console.log(`  Excluded questions             ${excludedCount} (no answer_session_ids in dataset; not scored)`);
+  }
   console.log();
 
   // Comparison
@@ -317,6 +481,7 @@ async function main(): Promise<void> {
       config: {
         embeddingModel: process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2',
         useRerank: useRerank && isLlmAvailable(),
+        rerankModel: useRerank && isLlmAvailable() ? (process.env.ENGRAM_MODEL ?? 'default') : null,
         questionLimit: limit ?? null,
       },
       results: {
@@ -330,6 +495,19 @@ async function main(): Promise<void> {
         hits10,
       },
       perCategory,
+      // Per-question breakdown — lean shape (no full chunk content,
+      // just the IDs needed to diagnose misses). Top-K retrieved
+      // sessions trimmed to 10 to keep the JSON small.
+      perQuestion: results.map(r => ({
+        questionId: r.questionId,
+        questionType: r.questionType,
+        questionPreview: r.question.slice(0, 120),
+        recall5: r.recall5,
+        recall10: r.recall10,
+        latencyMs: r.latencyMs,
+        answerSessionIds: r.answerSessionIds,
+        retrievedSessionIds: r.retrievedSessionIds.slice(0, 10),
+      })),
     });
     console.log(`Results JSON: ${path}`);
   }

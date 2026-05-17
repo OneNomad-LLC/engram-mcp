@@ -72,7 +72,10 @@ async function ensureStorage(): Promise<Storage> {
 }
 
 function text(t: string) { return { content: [{ type: 'text' as const, text: t }] }; }
-function json(data: any) { return text(JSON.stringify(data, null, 2)); }
+// Use `unknown` not `any` — every call site already narrows what it
+// passes; `any` here would silently accept (and serialize) anything,
+// including secrets that shouldn't be in tool responses.
+function json(data: unknown) { return text(JSON.stringify(data, null, 2)); }
 
 // ── MCP Server ──────────────────────────────────────────────────────
 
@@ -467,7 +470,29 @@ server.registerTool(
   },
   async ({ messages, conversationId, rulesOnly }) => {
     const storage = await ensureStorage();
-    const parsed = JSON.parse(messages);
+    // Bound input size BEFORE parse to prevent pathological-input DoS.
+    // 1 MB is far above any sane MCP message-array payload.
+    if (messages.length > 1_000_000) {
+      return json({
+        error: 'messages_too_large',
+        detail: `messages must be < 1MB (got ${messages.length} chars)`,
+      });
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(messages);
+    } catch (err) {
+      return json({
+        error: 'invalid_messages_json',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (!Array.isArray(parsed)) {
+      return json({
+        error: 'invalid_messages_format',
+        detail: 'messages must be a JSON array of {role, content} objects',
+      });
+    }
     const convId = conversationId ?? `mcp-${Date.now()}`;
 
     // Rules-only mode (replaces old engram-extract-rules tool)
