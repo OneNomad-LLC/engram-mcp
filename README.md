@@ -1,6 +1,12 @@
-# Engram
+# przm Memory <sub>(engram)</sub>
 
-A memory system for AI agents that actually works. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). Engram sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores **96.8% R@5 / 98.8% R@10 on LongMemEval** and **85.5% R@5 / 91.9% R@10 on LoCoMo** — on R@10 it beats MemPalace hybrid v5 (88.9%) by +3.0pp on LoCoMo and exceeds MemPalace hybrid v4's R@5 (98.4%) on LongMemEval, at **44ms p50 search latency** on a 53-session corpus. Methodology is reproducible from a fresh clone with one command. See [`benchmarks/results/published/`](benchmarks/results/published) for committed result JSONs.
+[![przm: Memory](https://img.shields.io/badge/przm-Memory-E84040?style=flat-square&labelColor=1a1a1a)](https://przm.sh)
+[![npm](https://img.shields.io/badge/npm-%40onenomad%2Fengram--mcp-cb3837?style=flat-square&labelColor=1a1a1a)](https://www.npmjs.com/package/@onenomad/engram-mcp)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square&labelColor=1a1a1a)](LICENSE)
+
+The memory surface of [przm](https://przm.sh), OneNomad's AI reliability suite. Technical handle: `engram`. npm: `@onenomad/engram-mcp`. GitHub: `OneNomad-LLC/engram-mcp`.
+
+A memory system for AI agents that actually works. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). przm Memory sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores **96.8% R@5 / 98.8% R@10 on LongMemEval** and **85.5% R@5 / 91.9% R@10 on LoCoMo** — on R@10 it beats MemPalace hybrid v5 (88.9%) by +3.0pp on LoCoMo and exceeds MemPalace hybrid v4's R@5 (98.4%) on LongMemEval, at **44ms p50 search latency** on a 53-session corpus. Methodology is reproducible from a fresh clone with one command. See [`benchmarks/results/published/`](benchmarks/results/published) for committed result JSONs.
 
 The core idea is that memory shouldn't just be "find similar text." When someone asks "where was I working last March?" the system needs to actually reason about time, not just pattern match on the word "March." So the search pipeline combines vector similarity, keyword matching with IDF weighting, temporal inference, a knowledge graph, and spreading activation over a memory graph. Each piece handles a different kind of recall that the others miss.
 
@@ -17,7 +23,7 @@ The core idea is that memory shouldn't just be "find similar text." When someone
 - [Benchmarks](#benchmarks)
 - [Security](#security)
 - [Use Cases](#use-cases)
-- [Pairs Well With: Persona MCP](#pairs-well-with-persona-mcp)
+- [Pairs Well With: przm Voice (persona)](#pairs-well-with-przm-voice-persona)
 - [License](#license)
 
 ## Benchmark Results
@@ -47,7 +53,7 @@ Most "AI memory" projects publish one of two very different metrics, and the fie
 
 These are not directly comparable. A system can hit 95% R@10 (the right memory was retrieved) and still produce wrong answers (the answer LLM ignored it or hallucinated). A system can hit 95% LLM-judge (lenient grader rewarded paraphrases) without ever retrieving the right memory.
 
-Engram publishes R@10. The two tables below are split by metric so you can compare like to like.
+przm Memory publishes R@10. The two tables below are split by metric so you can compare like to like.
 
 #### Retrieval recall — direct comparisons
 
@@ -56,7 +62,7 @@ LongMemEval (n=500, methodology-clean, verified 2026-05-16):
 | System | LongMemEval R@5 | LongMemEval R@10 | Requires API | Notes |
 |--------|-----------------|------------------|--------------|-------|
 | MemPalace hybrid v4 (held-out) | 98.4% | — | No | Their best zero-API config |
-| **Engram** | **96.8%** | **98.8%** | **No** | **Local MiniLM, 9-stage hybrid, no rerank — Engram's R@10 exceeds MemPalace's R@5** |
+| **przm Memory** | **96.8%** | **98.8%** | **No** | **Local MiniLM, 9-stage hybrid, no rerank — R@10 exceeds MemPalace's R@5** |
 | MemPalace raw ChromaDB | 96.6% | — | No | Baseline ChromaDB embeddings |
 | MemMachine v0.2 | — | — | Yes | (different metric, see LLM-judge table) |
 
@@ -64,7 +70,7 @@ LoCoMo (n=1,986, R@10 retrieval recall):
 
 | System | LoCoMo R@10 | Requires API | Notes |
 |--------|-------------|--------------|-------|
-| **Engram** | **91.9%** | **No** | **Verified 2026-05-16, full 1,986 QA, post-fix code path** |
+| **przm Memory** | **91.9%** | **No** | **Verified 2026-05-16, full 1,986 QA, post-fix code path** |
 | MemPalace hybrid v5 | 88.9% | No | Same metric, same dataset |
 | Supermemory | 83.5% | No | |
 
@@ -92,7 +98,7 @@ LLM-judge scores are sensitive to choices that aren't always disclosed in headli
 
 These aren't "gotchas" that disqualify the numbers — they're choices, and other projects make their own. The point is that LLM-judge accuracy isn't a standardized metric the way R@K is. Compare like to like.
 
-Engram's R@10 numbers are reproducible from a fresh clone with `pnpm bench:locomo` (committed result JSON in `benchmarks/results/published/`). The methodology is the architecture documented above; there's no benchmark-specific tuning in the search pipeline. Run the bench yourself.
+The R@10 numbers above are reproducible from a fresh clone with `pnpm bench:locomo` (committed result JSON in `benchmarks/results/published/`). The methodology is the architecture documented above; there's no benchmark-specific tuning in the search pipeline. Run the bench yourself.
 
 ## How It Works
 
@@ -143,7 +149,7 @@ Every chunk carries an `origin` tag that distinguishes user-asserted memory from
 - **`imported`** — bulk-loaded via `engram-import`.
 - **`derived`** — produced by consolidation (e.g. episodic-to-semantic summaries).
 
-The split mirrors the journal pattern in [Persona](https://github.com/OneNomad-LLC/persona-mcp): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
+The split mirrors the journal pattern in [przm Voice](https://github.com/OneNomad-LLC/persona-mcp) (persona): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
 
 Importance decays exponentially over time, but the rates differ by cognitive layer:
 - **Procedural** (rules): decays slowest (0.98/week, floor 0.15). Rules tend to stay relevant.
@@ -227,7 +233,7 @@ During consolidation, the system also scans for near-duplicates using cosine sim
 
 ### Handoff Protocol
 
-Context compaction is irreversible, and if the window fills completely before compaction runs the user has to abandon the chat. Engram treats this as a first-class failure mode and ships three tools that mechanize the fix:
+Context compaction is irreversible, and if the window fills completely before compaction runs the user has to abandon the chat. przm Memory treats this as a first-class failure mode and ships three tools that mechanize the fix:
 
 - `engram-handoff-write` persists a structured "where we left off" snapshot to `handoffs/YYYY-MM-DD_HH-MM-SS.{json,md}` — currentTask, completed, nextSteps, openQuestions, file references, decisions, and free-form notes. The JSON half is for programmatic resume; the markdown half is for humans.
 - `engram-handoff-read` loads the latest handoff (or a specific one by stamp). Agents call it at session start to pick up from exactly where the previous session stopped.
@@ -237,7 +243,7 @@ The bundled `engram_precompact_hook.sh` runs autonomously before compaction: it 
 
 #### Installing the hooks
 
-Engram ships two optional Claude Code hooks: `hooks/engram_precompact_hook.sh` (runs before `/compact`) and `hooks/engram_stop_hook.sh` (runs at session end to write a rolling checkpoint). Wire them in `~/.claude/settings.json` (or your project's `.claude/settings.json`):
+przm Memory ships two optional Claude Code hooks: `hooks/engram_precompact_hook.sh` (runs before `/compact`) and `hooks/engram_stop_hook.sh` (runs at session end to write a rolling checkpoint). Wire them in `~/.claude/settings.json` (or your project's `.claude/settings.json`):
 
 ```json
 {
@@ -254,11 +260,11 @@ Engram ships two optional Claude Code hooks: `hooks/engram_precompact_hook.sh` (
 
 Use the absolute path to the hook script — Claude Code does not resolve relative paths from your project root. On Windows, the hooks require WSL or Git Bash on PATH (they're bash scripts); native PowerShell is not supported.
 
-The hooks are optional. Engram's MCP tools work without them. The hooks just make the handoff lifeline reliable across `/compact` and session end without requiring you to remember to call `engram-handoff-write` manually.
+The hooks are optional. The MCP tools work without them. The hooks just make the handoff lifeline reliable across `/compact` and session end without requiring you to remember to call `engram-handoff-write` manually.
 
 ## Compatibility
 
-Engram is an MCP (Model Context Protocol) server. It works with any client that supports the MCP standard. That includes:
+przm Memory is an MCP (Model Context Protocol) server. It works with any client that supports the MCP standard. That includes:
 
 - **Claude Code** (Anthropic's CLI and desktop app)
 - **Claude.ai** (via MCP server configuration)
@@ -268,7 +274,7 @@ Engram is an MCP (Model Context Protocol) server. It works with any client that 
 - **Continue** (VS Code / JetBrains extension)
 - **Any MCP-compatible client** (the protocol is open and standardized)
 
-If your tool can connect to an MCP server over stdio, Engram will work with it.
+If your tool can connect to an MCP server over stdio, przm Memory will work with it.
 
 ## Installation
 
@@ -368,7 +374,7 @@ engram-mcp login --server https://pyre.sh # flag
 PYRE_API_URL=https://pyre.sh engram-mcp login   # env var
 ```
 
-`login` opens that URL in your browser, shows you a one-time pairing code, and waits for you to approve the device. On approval it writes `~/.pyre/credentials.json` (mode 0600) using the canonical `api_url` from the server's response — which may differ from the login URL you typed if the server normalises or redirects. From that point on Engram automatically routes through your cloud Engram instance. Local data stays local; nothing changes for users who don't run `login`.
+`login` opens that URL in your browser, shows you a one-time pairing code, and waits for you to approve the device. On approval it writes `~/.pyre/credentials.json` (mode 0600) using the canonical `api_url` from the server's response — which may differ from the login URL you typed if the server normalises or redirects. From that point on przm Memory automatically routes through your cloud instance. Local data stays local; nothing changes for users who don't run `login`.
 
 ```
 $ engram-mcp login https://pyre.sh
@@ -387,7 +393,7 @@ To sign out:
 engram-mcp logout
 ```
 
-This deletes `~/.pyre/credentials.json` and reverts Engram to local file mode on the next run. Idempotent — running it when you're already logged out exits 0.
+This deletes `~/.pyre/credentials.json` and reverts to local file mode on the next run. Idempotent — running it when you're already logged out exits 0.
 
 **Where credentials live**
 
@@ -403,15 +409,15 @@ export PYRE_API_URL=https://pyre.sh
 export PYRE_API_KEY=sk_pyre_xxx
 ```
 
-When `STORAGE_BACKEND` is unset, Engram probes for `~/.pyre/credentials.json` and uses cloud mode if it finds one. Explicit env vars always win.
+When `STORAGE_BACKEND` is unset, przm Memory probes for `~/.pyre/credentials.json` and uses cloud mode if it finds one. Explicit env vars always win.
 
 The existing `STORAGE_BACKEND=postgres` self-host path (below) is unaffected — none of this changes anything for users running their own postgres instance.
 
 ### Cloud / multi-tenant mode
 
-By default Engram stores everything locally under `ENGRAM_DATA_DIR` (LanceDB tables for chunks/daily_logs/rules/knowledge_triples, plus markdown files for diary and handoffs). For a single user on a single machine this is the right answer — fast, offline, zero dependencies.
+By default przm Memory stores everything locally under `ENGRAM_DATA_DIR` (LanceDB tables for chunks/daily_logs/rules/knowledge_triples, plus markdown files for diary and handoffs). For a single user on a single machine this is the right answer — fast, offline, zero dependencies.
 
-For shared/cloud deployments where many users share one Engram process, Engram also speaks postgres with [pgvector](https://github.com/pgvector/pgvector).
+For shared/cloud deployments where many users share one process, it also speaks postgres with [pgvector](https://github.com/pgvector/pgvector).
 
 1. Provision a postgres database with the `vector` extension available.
 2. Set environment variables:
@@ -436,7 +442,7 @@ For shared/cloud deployments where many users share one Engram process, Engram a
 
    This creates the six tables (`chunks`, `daily_logs`, `rules`, `knowledge_triples`, `diary_entries`, `handoffs`), enables the `vector` extension, and adds the hot-path indexes (per-tenant created_at, ivfflat on chunks.embedding, etc.). The runner is idempotent — re-running is a no-op for already-applied files.
 
-5. Boot Engram normally. Every query is scoped by `TENANT_ID`; switching tenants is just a different env var on a different process.
+5. Boot przm Memory normally. Every query is scoped by `TENANT_ID`; switching tenants is just a different env var on a different process.
 
 **Notes**
 
@@ -505,7 +511,7 @@ These work in any MCP-compatible client (Claude Code, Cursor, etc.). The MCP ser
 
 | Command | What it does |
 |---------|-------------|
-| `/memory-source <engram\|off\|hybrid>` | Switch memory backend. "engram" uses Engram exclusively, "off" disables all persistent memory, "hybrid" runs Engram alongside native client memory. |
+| `/memory-source <engram\|off\|hybrid>` | Switch memory backend. "engram" uses przm Memory exclusively, "off" disables all persistent memory, "hybrid" runs przm Memory alongside native client memory. |
 | `/recall <query>` | Search memories using the full hybrid pipeline (vector + keyword + temporal + KG + spreading activation). Results presented conversationally. |
 | `/forget <what>` | Find and remove or correct specific memories. Shows matches and confirms before acting. |
 | `/memory-health [maintain]` | Show memory system stats (tiers, layers, rules, KG size). With "maintain", runs the full consolidation cycle. |
@@ -515,7 +521,7 @@ These work in any MCP-compatible client (Claude Code, Cursor, etc.). The MCP ser
 
 ### Installing Slash Commands for Claude Code
 
-The slash commands above are advertised in Engram's MCP server instructions and work automatically in most clients. For Claude Code specifically, you can also install them as custom commands so they show up in the `/` command menu:
+The slash commands above are advertised in the MCP server instructions and work automatically in most clients. For Claude Code specifically, you can also install them as custom commands so they show up in the `/` command menu:
 
 ```bash
 # From the engram directory
@@ -650,7 +656,7 @@ npm run bench:longmemeval -- --rerank
 
 Runtime: ~6–10 min for the full 500 on an M-series Mac. The dataset is ~277 MB. Paper: [Wu et al., 2024](https://arxiv.org/abs/2410.10813).
 
-### Engram synthetic suite (`bench`)
+### przm Memory synthetic suite (`bench`)
 
 A self-contained 15-question battery covering single-fact recall, preferences, temporal reasoning, knowledge updates, and adversarial / distractor resistance. No dataset download. Exits non-zero when R@5 drops below 70% — used as the pre-merge regression gate.
 
@@ -705,37 +711,37 @@ All memory data stays on disk at `~/.claude/engram/`. Nothing gets sent anywhere
 
 Here are some real situations where this makes a difference.
 
-**Personal AI assistant.** The most obvious one. You talk to an AI every day and it forgets everything between sessions. Engram fixes that. It learns your preferences, remembers your projects, picks up your corrections, and builds a picture of who you are over time. Instead of re-explaining yourself every conversation, the agent just knows.
+**Personal AI assistant.** The most obvious one. You talk to an AI every day and it forgets everything between sessions. przm Memory fixes that. It learns your preferences, remembers your projects, picks up your corrections, and builds a picture of who you are over time. Instead of re-explaining yourself every conversation, the agent just knows.
 
-**Developer tools.** If you use Claude Code, Cursor, or any AI coding tool, the agent forgets your codebase conventions, your preferred patterns, and the decisions you've already made. Engram picks up things like "always use explicit return types" or "we deploy to Vercel, not AWS" and carries them forward. Procedural rules are built for this.
+**Developer tools.** If you use Claude Code, Cursor, or any AI coding tool, the agent forgets your codebase conventions, your preferred patterns, and the decisions you've already made. przm Memory picks up things like "always use explicit return types" or "we deploy to Vercel, not AWS" and carries them forward. Procedural rules are built for this.
 
 **Customer support agents.** A support bot that actually remembers a customer's history, past issues, and preferences without needing to query a CRM every time. The knowledge graph handles entity relationships ("Customer X uses Plan Y, started in March") and temporal queries let the agent reason about timelines.
 
-**Research and note-taking.** If you use an AI to research topics over multiple sessions, Engram lets it build on previous findings instead of starting from scratch. The diary system logs what happened each session, and the search pipeline surfaces relevant prior research when you come back to a topic.
+**Research and note-taking.** If you use an AI to research topics over multiple sessions, przm Memory lets it build on previous findings instead of starting from scratch. The diary system logs what happened each session, and the search pipeline surfaces relevant prior research when you come back to a topic.
 
 **Multi-agent systems.** Multiple agents can share the same memory store. One agent handles research, another handles coding, and they both read from and write to the same LanceDB. The MCP protocol makes this straightforward since any MCP-compatible client can connect to the server.
 
 **Therapy / coaching bots.** Sensitive use case, but a good one. An AI that remembers what you talked about last week, tracks your goals, and notices patterns in your behavior over time. The tier lifecycle naturally keeps recent context hot while letting older sessions fade unless they stay relevant.
 
-## Pairs Well With: Persona MCP
+## Pairs Well With: przm Voice (persona)
 
-If Engram is the brain, [Persona](https://github.com/OneNomad-LLC/persona-mcp) is the personality.
+If przm Memory is the brain, [przm Voice](https://github.com/OneNomad-LLC/persona-mcp) (technical handle: `persona`) is the personality.
 
-Engram handles *what* the agent remembers: facts, preferences, rules, timelines. Persona handles *how* the agent communicates: tone, verbosity, format preferences, and communication style. They solve different problems but work best together.
+przm Memory handles *what* the agent remembers: facts, preferences, rules, timelines. przm Voice handles *how* the agent communicates: tone, verbosity, format preferences, and communication style. They solve different problems but work best together.
 
-Here's why the combo matters. Engram will learn that you prefer TypeScript over Python. Persona will learn that you want short answers with code first and explanation after. Engram will store the fact that you got laid off last month. Persona will know not to bring that up casually based on the emotional context it picked up.
+Here's why the combo matters. przm Memory will learn that you prefer TypeScript over Python. przm Voice will learn that you want short answers with code first and explanation after. przm Memory will store the fact that you got laid off last month. przm Voice will know not to bring that up casually based on the emotional context it picked up.
 
-Persona tracks behavioral signals (corrections, approvals, frustrations, praise) and builds a communication profile that adapts over time. Engram's procedural rules overlap a little here ("never use em-dashes"), but Persona goes deeper into *how* the agent should talk to you specifically. Things like matching your energy level, knowing when to be terse vs. when to elaborate, and adjusting formality based on the topic.
+przm Voice tracks behavioral signals (corrections, approvals, frustrations, praise) and builds a communication profile that adapts over time. The procedural rules surface here overlaps a little ("never use em-dashes"), but Voice goes deeper into *how* the agent should talk to you specifically. Things like matching your energy level, knowing when to be terse vs. when to elaborate, and adjusting formality based on the topic.
 
 When both servers are running, they coordinate through three mechanisms:
 
-1. **Emotion-weighted memory importance.** Engram calls `persona_state` during ingestion to get the current emotional valence and arousal. High-arousal negative emotions boost memory importance by up to 30%. A frustrated correction gets remembered more strongly than a neutral fact.
+1. **Emotion-weighted memory importance.** Memory calls `persona_state` during ingestion to get the current emotional valence and arousal. High-arousal negative emotions boost memory importance by up to 30%. A frustrated correction gets remembered more strongly than a neutral fact.
 
-2. **Cognitive-load-gated search.** When Persona detects cognitive overload, Engram's `engram-search` receives the load signal and returns only the top 3 high-importance memories instead of the full result set. Less noise when you're already overwhelmed.
+2. **Cognitive-load-gated search.** When Voice detects cognitive overload, Memory's `engram-search` receives the load signal and returns only the top 3 high-importance memories instead of the full result set. Less noise when you're already overwhelmed.
 
-3. **Procedural bridge.** Engram's learned rules (from corrections and instructions) and Persona's applied evolution proposals sync through a shared bridge file at `~/.claude/procedural-bridge.json`. Engram rules become Persona proposals. Persona's applied proposals reinforce or create Engram rules. The bridge auto-syncs during `persona_consolidate`.
+3. **Procedural bridge.** Memory's learned rules (from corrections and instructions) and Voice's applied evolution proposals sync through a shared bridge file at `~/.claude/procedural-bridge.json`. Memory rules become Voice proposals. Voice's applied proposals reinforce or create Memory rules. The bridge auto-syncs during `persona_consolidate`.
 
-You can run Engram without Persona and it works fine. But if you want an AI that actually feels like it knows you, not just what you've told it, but how you like to be talked to, run both.
+You can run Memory without Voice and it works fine. But if you want an AI that actually feels like it knows you, not just what you've told it, but how you like to be talked to, run both.
 
 ## License
 
