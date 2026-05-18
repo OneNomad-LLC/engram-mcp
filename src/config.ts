@@ -6,23 +6,28 @@ import { DEFAULT_CONFIG } from './types.js';
 /**
  * Load config from environment variables.
  *
- * Data stored under ~/.claude/engram by default.
- * Override with ENGRAM_DATA_DIR (or legacy SMART_MEMORY_DATA_DIR).
+ * Data stored under ~/.claude/przm-memory by default.
+ * Override with PRZM_MEMORY_DATA_DIR (legacy: ENGRAM_DATA_DIR, SMART_MEMORY_DATA_DIR).
  *
  * LLM calls use OPENROUTER_API_KEY (for extraction, re-ranking).
  * Any model provider on openrouter.ai works.
  * Mem0 uses MEM0_API_KEY (optional cloud extraction provider).
  */
 
-/** Read env var with new ENGRAM_ prefix, falling back to legacy SMART_MEMORY_ prefix. */
-function env(name: string, legacyName?: string): string | undefined {
-  return process.env[name] ?? (legacyName ? process.env[legacyName] : undefined);
+/** Read env var with new PRZM_MEMORY_ prefix; falls back to legacy ENGRAM_ then SMART_MEMORY_. */
+function env(name: string, ...legacyNames: string[]): string | undefined {
+  const direct = process.env[name];
+  if (direct !== undefined) return direct;
+  for (const legacy of legacyNames) {
+    if (process.env[legacy] !== undefined) return process.env[legacy];
+  }
+  return undefined;
 }
 
 export function loadConfig(overrides?: Partial<SmartMemoryConfig>): SmartMemoryConfig {
   const config: SmartMemoryConfig = {
     ...DEFAULT_CONFIG,
-    dataDir: env('ENGRAM_DATA_DIR', 'SMART_MEMORY_DATA_DIR') ?? join(homedir(), '.claude', 'engram'),
+    dataDir: env('PRZM_MEMORY_DATA_DIR', 'ENGRAM_DATA_DIR', 'SMART_MEMORY_DATA_DIR') ?? join(homedir(), '.claude', 'przm-memory'),
     ...overrides,
   };
 
@@ -30,7 +35,7 @@ export function loadConfig(overrides?: Partial<SmartMemoryConfig>): SmartMemoryC
     config.mem0ApiKey = process.env.MEM0_API_KEY ?? '';
   }
 
-  const extractionProvider = env('ENGRAM_EXTRACTION_PROVIDER', 'SMART_MEMORY_EXTRACTION_PROVIDER');
+  const extractionProvider = env('PRZM_MEMORY_EXTRACTION_PROVIDER', 'ENGRAM_EXTRACTION_PROVIDER', 'SMART_MEMORY_EXTRACTION_PROVIDER');
   if (extractionProvider) {
     config.extractionProvider = extractionProvider as SmartMemoryConfig['extractionProvider'];
   }
@@ -43,14 +48,14 @@ export function loadConfig(overrides?: Partial<SmartMemoryConfig>): SmartMemoryC
     return fallback;
   };
 
-  config.enableRRF = envBool('ENGRAM_ENABLE_RRF', 'SMART_MEMORY_ENABLE_RRF', config.enableRRF);
-  config.enableFSRS = envBool('ENGRAM_ENABLE_FSRS', 'SMART_MEMORY_ENABLE_FSRS', config.enableFSRS);
-  config.enableContextualPrefix = envBool('ENGRAM_ENABLE_CONTEXTUAL_PREFIX', 'SMART_MEMORY_ENABLE_CONTEXTUAL_PREFIX', config.enableContextualPrefix);
-  config.enableBiasedReplay = envBool('ENGRAM_ENABLE_BIASED_REPLAY', 'SMART_MEMORY_ENABLE_BIASED_REPLAY', config.enableBiasedReplay);
-  config.enableCrossEncoderRerank = envBool('ENGRAM_ENABLE_CROSS_ENCODER_RERANK', 'SMART_MEMORY_ENABLE_CROSS_ENCODER_RERANK', config.enableCrossEncoderRerank);
-  config.enableEpisodicConsolidation = envBool('ENGRAM_ENABLE_EPISODIC_CONSOLIDATION', 'SMART_MEMORY_ENABLE_EPISODIC_CONSOLIDATION', config.enableEpisodicConsolidation);
-  config.enableChunking = envBool('ENGRAM_ENABLE_CHUNKING', 'SMART_MEMORY_ENABLE_CHUNKING', config.enableChunking);
-  config.enableRetrievalTraces = envBool('ENGRAM_ENABLE_RETRIEVAL_TRACES', 'SMART_MEMORY_ENABLE_RETRIEVAL_TRACES', config.enableRetrievalTraces);
+  config.enableRRF = envBool('PRZM_MEMORY_ENABLE_RRF', 'SMART_MEMORY_ENABLE_RRF', config.enableRRF);
+  config.enableFSRS = envBool('PRZM_MEMORY_ENABLE_FSRS', 'SMART_MEMORY_ENABLE_FSRS', config.enableFSRS);
+  config.enableContextualPrefix = envBool('PRZM_MEMORY_ENABLE_CONTEXTUAL_PREFIX', 'SMART_MEMORY_ENABLE_CONTEXTUAL_PREFIX', config.enableContextualPrefix);
+  config.enableBiasedReplay = envBool('PRZM_MEMORY_ENABLE_BIASED_REPLAY', 'SMART_MEMORY_ENABLE_BIASED_REPLAY', config.enableBiasedReplay);
+  config.enableCrossEncoderRerank = envBool('PRZM_MEMORY_ENABLE_CROSS_ENCODER_RERANK', 'SMART_MEMORY_ENABLE_CROSS_ENCODER_RERANK', config.enableCrossEncoderRerank);
+  config.enableEpisodicConsolidation = envBool('PRZM_MEMORY_ENABLE_EPISODIC_CONSOLIDATION', 'SMART_MEMORY_ENABLE_EPISODIC_CONSOLIDATION', config.enableEpisodicConsolidation);
+  config.enableChunking = envBool('PRZM_MEMORY_ENABLE_CHUNKING', 'SMART_MEMORY_ENABLE_CHUNKING', config.enableChunking);
+  config.enableRetrievalTraces = envBool('PRZM_MEMORY_ENABLE_RETRIEVAL_TRACES', 'SMART_MEMORY_ENABLE_RETRIEVAL_TRACES', config.enableRetrievalTraces);
 
   const traceRetention = env('ENGRAM_TRACE_RETENTION_DAYS', 'SMART_MEMORY_TRACE_RETENTION_DAYS');
   if (traceRetention) {

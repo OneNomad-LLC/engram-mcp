@@ -1,8 +1,8 @@
 {
-  "name": "@onenomad/engram-mcp",
-  "version": "2.4.0",
-  "mcpName": "io.github.onenomad-llc/engram-mcp",
-  "description": "przm Memory (engram) — local-first memory MCP server for AI agents. Part of the przm AI reliability suite. LLM-powered extraction, hybrid ANN search, tier lifecycle, spreading activation, procedural rules, real-time ingest, and session-state.",
+  "name": "@onenomad/przm-memory",
+  "version": "0.0.0-pre",
+  "mcpName": "io.github.onenomad-llc/przm-memory",
+  "description": "przm Memory — local-first memory MCP server for AI agents. Part of the przm AI reliability suite. LLM-powered extraction, hybrid ANN search, tier lifecycle, spreading activation, procedural rules, real-time ingest, and session-state.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,9 +15,9 @@
     "./cli": "./dist/cli.js"
   },
   "bin": {
-    "engram-memory": "dist/server.js",
-    "engram-mcp": "dist/cli.js",
-    "engram-migrate": "dist/migrate.js"
+    "przm-memory": "dist/server.js",
+    "przm-memory-mcp": "dist/cli.js",
+    "przm-memory-migrate": "dist/migrate.js"
   },
   "files": [
     "dist",
