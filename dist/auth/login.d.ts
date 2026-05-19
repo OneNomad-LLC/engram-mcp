@@ -1,5 +1,5 @@
 /**
- * Device-code login + logout against pyre-web.
+ * Device-code login + logout against przm server.
  *
  * Flow:
  *   1. POST /api/auth/device-code → user_code, device_code, verification_url, expires_in, interval.
@@ -42,7 +42,7 @@ export type DeviceCodePoll = {
 };
 export interface LoginOptions {
     /**
-     * pyre-web base URL. Required. Caller (the CLI) is responsible for
+     * przm server base URL. Required. Caller (the CLI) is responsible for
      * resolving this from positional arg / --server flag / PYRE_API_URL
      * env var and refusing to call runLogin() without one. runLogin
      * itself does NOT look at process.env — keeps the function

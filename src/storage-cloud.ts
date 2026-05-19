@@ -1,15 +1,15 @@
 /**
- * CloudStorageAdapter — Pyre Cloud HTTP-backed storage.
+ * CloudStorageAdapter — przm Cloud HTTP-backed storage.
  *
- * Speaks the wire contract pyre-web exposes at /api/engram/*. Each
- * StorageAdapter method maps to a single HTTP request — pyre-web is
+ * Speaks the wire contract przm server exposes at /api/engram/*. Each
+ * StorageAdapter method maps to a single HTTP request — przm server is
  * a thin multi-tenant Postgres-over-HTTP shim that mirrors what
  * PostgresStorageAdapter does locally.
  *
  * Auth: Bearer token from credentials.json. The server derives the
  * tenant_id from the api-key; the adapter never plumbs it.
  *
- * Error envelope: pyre-web emits `{ "error": { "code", "message" } }`
+ * Error envelope: przm server emits `{ "error": { "code", "message" } }`
  * on non-2xx. errorBody() unpacks it; failures bubble up as Error
  * with that text so the rest of the engram pipeline reports cleanly.
  */
@@ -94,7 +94,7 @@ export class CloudStorageAdapter implements StorageAdapter {
     const res = await this.request(method, path, body);
     if (!res.ok) {
       const msg = await errorBody(res);
-      throw new Error(`Engram cloud ${method} ${path} ${res.status}: ${msg}`);
+      throw new Error(`przm Memory cloud ${method} ${path} ${res.status}: ${msg}`);
     }
     return res;
   }
@@ -109,16 +109,16 @@ export class CloudStorageAdapter implements StorageAdapter {
   async ensureReady(): Promise<void> {
     // Lightweight identity probe. Verifies credentials are live and the
     // server is reachable before any pipeline work spins up. 401 here is
-    // a clean signal to re-run `engram-mcp login`.
+    // a clean signal to re-run `przm-memory-mcp login`.
     const res = await this.request('GET', '/api/auth/whoami');
     if (!res.ok) {
       const msg = await errorBody(res);
       if (res.status === 401) {
         throw new Error(
-          `Engram cloud: credentials invalid or expired (${msg}). Run \`engram-mcp login <url>\` again.`,
+          `przm Memory cloud: credentials invalid or expired (${msg}). Run \`przm-memory-mcp login <url>\` again.`,
         );
       }
-      throw new Error(`Engram cloud: server check failed (${res.status}): ${msg}`);
+      throw new Error(`przm Memory cloud: server check failed (${res.status}): ${msg}`);
     }
   }
 
@@ -142,7 +142,7 @@ export class CloudStorageAdapter implements StorageAdapter {
     if (res.status === 404) return null;
     if (!res.ok) {
       const msg = await errorBody(res);
-      throw new Error(`Engram cloud GET /chunks/${id} ${res.status}: ${msg}`);
+      throw new Error(`przm Memory cloud GET /chunks/${id} ${res.status}: ${msg}`);
     }
     return (await res.json()) as StoredChunk;
   }
@@ -285,7 +285,7 @@ export class CloudStorageAdapter implements StorageAdapter {
   // ── Handoffs ───────────────────────────────────────────────────────
 
   async writeHandoff(note: Omit<HandoffNote, 'timestamp'>): Promise<HandoffNote> {
-    // pyre-web returns { stamp, ...HandoffNote }. The local file adapter
+    // przm server returns { stamp, ...HandoffNote }. The local file adapter
     // returns just HandoffNote, and downstream consumers don't depend on
     // `stamp` from this method's return — strip it so the contract matches.
     const full = await this.sendJson<HandoffNote & { stamp?: string }>(
@@ -304,7 +304,7 @@ export class CloudStorageAdapter implements StorageAdapter {
     if (res.status === 404) return null;
     if (!res.ok) {
       const msg = await errorBody(res);
-      throw new Error(`Engram cloud GET /handoffs/${target} ${res.status}: ${msg}`);
+      throw new Error(`przm Memory cloud GET /handoffs/${target} ${res.status}: ${msg}`);
     }
     return (await res.json()) as HandoffNote;
   }

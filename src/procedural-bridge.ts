@@ -5,14 +5,19 @@ import type { ProceduralRule } from './types.js';
 import { Storage } from './storage.js';
 
 /**
- * Procedural bridge — shared interchange between Engram and Persona.
+ * Procedural bridge — shared interchange between przm Memory and przm Voice.
  *
  * Both servers read/write a neutral JSON file at ~/.claude/procedural-bridge.json.
  * Neither imports code from the other. The AI client can also trigger sync
  * explicitly via tools.
  *
- * Engram exports its procedural rules with confidence > 0.3.
- * Engram imports Persona-sourced rules as new ProceduralRules with low initial confidence.
+ * przm Memory exports its procedural rules with confidence > 0.3.
+ * przm Memory imports Voice-sourced rules as new ProceduralRules with low initial confidence.
+ *
+ * Note: the `source` discriminator on BridgeRule still uses the legacy
+ * `'engram' | 'persona'` literal so existing on-disk bridge files
+ * (~/.claude/procedural-bridge.json) and the parallel reader on the Voice
+ * side keep working. This is a wire-format identifier, not a brand string.
  */
 
 // ── Interchange Format ─────────────────────────────────────────────
@@ -52,13 +57,13 @@ export function loadBridgeFile(): ProceduralInterchange {
 
 export function saveBridgeFile(data: ProceduralInterchange): void {
   const dir = dirname(BRIDGE_PATH);
-  // 0700 owner-only (defensive). Bridge file mediates with Persona.
+  // 0700 owner-only (defensive). Bridge file mediates with przm Voice.
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
   data.lastUpdated = new Date().toISOString();
   writeFileSync(BRIDGE_PATH, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-// ── Export Engram Rules → Bridge ───────────────────────────────────
+// ── Export przm Memory Rules → Bridge ──────────────────────────────
 
 export async function exportRulesToBridge(storage: Storage): Promise<number> {
   const rules = await storage.getRules();
@@ -66,7 +71,7 @@ export async function exportRulesToBridge(storage: Storage): Promise<number> {
 
   const bridge = loadBridgeFile();
 
-  // Keep Persona-sourced rules, replace Engram-sourced rules
+  // Keep Voice-sourced rules, replace Memory-sourced rules
   const personaRules = bridge.rules.filter(r => r.source === 'persona');
   const engramRules: BridgeRule[] = exportable.map(r => ({
     id: `engram:${r.id}`,
@@ -86,7 +91,7 @@ export async function exportRulesToBridge(storage: Storage): Promise<number> {
   return engramRules.length;
 }
 
-// ── Import Persona Rules → Engram ──────────────────────────────────
+// ── Import Voice Rules → przm Memory ───────────────────────────────
 
 export async function importRulesFromBridge(
   storage: Storage
@@ -100,7 +105,7 @@ export async function importRulesFromBridge(
   let conflicts = 0;
 
   for (const pr of personaRules) {
-    // Check if a matching Engram rule exists (word overlap)
+    // Check if a matching przm Memory rule exists (word overlap)
     const matchIdx = findMatchingRule(pr.rule, existing);
 
     if (matchIdx >= 0) {

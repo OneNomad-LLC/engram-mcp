@@ -409,7 +409,7 @@ export class PostgresStorageAdapter implements StorageAdapter {
     // valid_from is part of the domain object but not in the spec's
     // schema — fold it into source_id-adjacent metadata is overkill;
     // we keep validFrom == createdAt for postgres mode and surface
-    // createdAt on read. Engram's bench uses validTo for invalidation
+    // createdAt on read. przm Memory's bench uses validTo for invalidation
     // which IS preserved.
   }
 

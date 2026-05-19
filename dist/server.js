@@ -44,21 +44,21 @@ function text(t) { return { content: [{ type: 'text', text: t }] }; }
 // including secrets that shouldn't be in tool responses.
 function json(data) { return text(JSON.stringify(data, null, 2)); }
 // ── MCP Server ──────────────────────────────────────────────────────
-const server = new McpServer({ name: 'engram', version: '2.4.0' }, {
+const server = new McpServer({ name: 'przm-memory', version: '1.0.0' }, {
     instructions: [
-        'Engram is your long-term memory.',
+        'przm Memory is your long-term memory.',
         '',
-        'Save what matters: engram-ingest for facts/preferences/decisions, engram-kg-add for relationships, engram-diary-write at session end.',
-        'Before answering about prior conversations: engram-search first.',
+        'Save what matters: memory-ingest for facts/preferences/decisions, memory-kg-add for relationships, memory-diary-write at session end.',
+        'Before answering about prior conversations: memory-search first.',
         '',
         '## Handoff protocol (MANDATORY)',
         'Context compaction can fail if the window fills completely. When that happens, the user has to abandon the chat. Never let this happen.',
         '',
-        '1. Save memories continuously with engram-ingest — never batch.',
-        '2. At session start, call engram-handoff-read to resume where the prior session left off. If the user references a specific past session (by name or topic), call engram-handoff-list first and load the matching named checkpoint with engram-handoff-read({ name }).',
-        '3. When context feels heavy (long tool outputs, many file reads, extended work) call engram-context-pressure with your honest level assessment. Follow the returned actionPlan.',
-        '4. At NATURAL PHASE BOUNDARIES (task done, pivoting focus, finishing a subsystem, user says "ok next let\'s…") call engram-context-pressure with phaseBoundary=true and compact. Pivots thrash the cache anyway — compacting at the boundary is a free lunch, carrying verbose tool output from the old phase into the new one is not.',
-        '5. BEFORE invoking /compact — or before session end, or when the user asks to "save this session" / "checkpoint this" — call engram-handoff-write with a full "where we left off" snapshot: currentTask, completed, nextSteps, openQuestions, fileRefs (path:line), decisions, notes. Pass `name` for a user-friendly checkpoint label so the user can resume it explicitly later.',
+        '1. Save memories continuously with memory-ingest — never batch.',
+        '2. At session start, call memory-handoff-read to resume where the prior session left off. If the user references a specific past session (by name or topic), call memory-handoff-list first and load the matching named checkpoint with memory-handoff-read({ name }).',
+        '3. When context feels heavy (long tool outputs, many file reads, extended work) call memory-context-pressure with your honest level assessment. Follow the returned actionPlan.',
+        '4. At NATURAL PHASE BOUNDARIES (task done, pivoting focus, finishing a subsystem, user says "ok next let\'s…") call memory-context-pressure with phaseBoundary=true and compact. Pivots thrash the cache anyway — compacting at the boundary is a free lunch, carrying verbose tool output from the old phase into the new one is not.',
+        '5. BEFORE invoking /compact — or before session end, or when the user asks to "save this session" / "checkpoint this" — call memory-handoff-write with a full "where we left off" snapshot: currentTask, completed, nextSteps, openQuestions, fileRefs (path:line), decisions, notes. Pass `name` for a user-friendly checkpoint label so the user can resume it explicitly later.',
         '6. Do not wait for the system to auto-compact. Compact early, while there is still headroom for the handoff.',
         '',
         'If persona MCP available: call persona_signal on user reactions (correction, approval, frustration, praise, etc).',
@@ -67,7 +67,7 @@ const server = new McpServer({ name: 'engram', version: '2.4.0' }, {
 // ─────────────────────────────────────────────────────────────────────
 // CORE MEMORY TOOLS
 // ─────────────────────────────────────────────────────────────────────
-server.registerTool('engram-search', {
+server.registerTool('memory-search', {
     title: 'Search Memories',
     description: 'Search long-term memories. Returns relevant facts, preferences, decisions, and rules. Set format=true to get pre-formatted output for prompt injection.',
     inputSchema: z.object({
@@ -141,13 +141,13 @@ server.registerTool('engram-search', {
         })),
     });
 });
-server.registerTool('engram-budget', {
+server.registerTool('memory-budget', {
     title: 'Search Memories Within a Token Budget',
     description: [
-        'Like engram-search, but returns memories that fit within a TOKEN BUDGET instead of a count limit.',
+        'Like memory-search, but returns memories that fit within a TOKEN BUDGET instead of a count limit.',
         'Greedy fill from highest-relevance memories: candidates ranked by score × importance, included until the next entry would exceed the budget.',
-        'Used by Pyre\'s Context Budget Engine: the persona/memories slot allocates N tokens, and Engram returns "the most useful subset that fits."',
-        'Returns the same memory shape as engram-search plus { budgetTokens, usedTokens, includedCount, candidateCount } so callers can see how the budget got spent.',
+        'Used by przm\'s Context Budget Engine: the persona/memories slot allocates N tokens, and przm Memory returns "the most useful subset that fits."',
+        'Returns the same memory shape as memory-search plus { budgetTokens, usedTokens, includedCount, candidateCount } so callers can see how the budget got spent.',
     ].join(' '),
     inputSchema: z.object({
         query: z.string().describe('Natural language search query.'),
@@ -166,7 +166,7 @@ server.registerTool('engram-budget', {
     // estimate is conservative: 4 chars/token for English-prose
     // memory content + a 30-token wrapper overhead per entry for
     // type/source/tags rendering. Slightly over-estimating beats
-    // under-estimating; the budget caller (Pyre's CBE) prefers a
+    // under-estimating; the budget caller (przm's CBE) prefers a
     // small remainder over a hard overflow.
     const ranked = candidates
         .map((r) => ({ r, weight: r.score * (r.chunk.importance + 0.1) }))
@@ -213,7 +213,7 @@ server.registerTool('engram-budget', {
         })),
     });
 });
-server.registerTool('engram-ingest', {
+server.registerTool('memory-ingest', {
     title: 'Save Memory',
     description: 'Save a fact, preference, decision, correction, or context to long-term memory. Auto-classifies type/tags if omitted. Auto-checks for duplicates before saving unless skipDedupe=true.',
     inputSchema: z.object({
@@ -231,9 +231,9 @@ server.registerTool('engram-ingest', {
         origin: z.enum(['user', 'derived', 'extracted', 'imported']).optional().describe('Provenance. Default "user" — explicit ingest is treated as user-asserted and protected from auto-merge / archive. Set "derived" when the caller is a downstream pipeline writing inferences.'),
         tier: z.enum(['scratch', 'short-term']).optional().describe('Memory tier. "scratch" = session-only, never promoted by consolidation, auto-purged after 24h. Use for exploratory notes you may want to discard. Default short-term.'),
         createdAt: z.string().optional().describe('ISO 8601 timestamp override. Default: ingest time (now). Use this when ingesting memories that ORIGINALLY happened at a different time — meeting notes from yesterday, chat history from last week, dated documents from years ago. The timestamp flows into the contextual prefix embedded with the content, giving the retrieval pipeline a temporal signal it would otherwise lose. Critical for benchmarks (LoCoMo) and real workloads that backfill historical context (Cortex ingest of dated docs, importing chat history from Slack/Discord).'),
-        skipKgExtraction: z.boolean().optional().describe('Skip the per-chunk knowledge-graph triple extraction. Production users should leave this off — KG extraction powers engram-dossier, engram-kg-query, and graph-aware reranking. Benchmark harnesses comparing apples-to-apples vs the standalone locomo bench (which bypasses wal.ts entirely) should set this to true so they measure the same code path.'),
-        skipDailyEntry: z.boolean().optional().describe('Skip the post-batch daily-entry append. Production users should leave this off — daily entries power engram-diary-read and cross-session summaries. Benchmark harnesses set this true alongside skipKgExtraction to match the standalone bench setup.'),
-        awaitSideEffects: z.boolean().optional().describe('When false, KG extraction + daily-entry append run in the BACKGROUND after the chunks land on disk; engram-ingest returns ~5-30x faster. Default true (caller awaits everything). Right for production paths where the agent doesn\'t immediately query the just-written content (chat WAL, vault → Engram bridge). Sync mode (true) is right when the caller WILL query within the same turn — bench harnesses, test fixtures, multi-step extraction pipelines.'),
+        skipKgExtraction: z.boolean().optional().describe('Skip the per-chunk knowledge-graph triple extraction. Production users should leave this off — KG extraction powers memory-dossier, memory-kg-query, and graph-aware reranking. Benchmark harnesses comparing apples-to-apples vs the standalone locomo bench (which bypasses wal.ts entirely) should set this to true so they measure the same code path.'),
+        skipDailyEntry: z.boolean().optional().describe('Skip the post-batch daily-entry append. Production users should leave this off — daily entries power memory-diary-read and cross-session summaries. Benchmark harnesses set this true alongside skipKgExtraction to match the standalone bench setup.'),
+        awaitSideEffects: z.boolean().optional().describe('When false, KG extraction + daily-entry append run in the BACKGROUND after the chunks land on disk; memory-ingest returns ~5-30x faster. Default true (caller awaits everything). Right for production paths where the agent doesn\'t immediately query the just-written content (chat WAL, vault → przm Memory bridge). Sync mode (true) is right when the caller WILL query within the same turn — bench harnesses, test fixtures, multi-step extraction pipelines.'),
     }),
 }, async ({ content, type, importance, tags, source, domain, topic, sentiment, emotionalValence, emotionalArousal, skipDedupe, origin, tier, createdAt, skipKgExtraction, skipDailyEntry, awaitSideEffects }) => {
     const storage = await ensureStorage();
@@ -284,7 +284,7 @@ server.registerTool('engram-ingest', {
         } : null,
     });
 });
-// engram-update-metadata — patch metadata-shape fields on an existing
+// memory-update-metadata — patch metadata-shape fields on an existing
 // memory by id. Closes a gap that callers (e.g. cortex's workspace
 // backfill) hit when they need to correct stamps without re-ingesting
 // (which either dupes or relies on similarity dedupe to overwrite —
@@ -301,7 +301,7 @@ server.registerTool('engram-ingest', {
 // (`embedding`, `embeddingVersion`) are rejected — those are either
 // immutable identity or computed from content. Callers wanting to
 // re-embed should re-ingest with skipDedupe.
-server.registerTool('engram-update-metadata', {
+server.registerTool('memory-update-metadata', {
     title: 'Update Memory Metadata',
     description: 'Patch metadata-shape fields on an existing memory by id. Use to correct mis-stamped tags/source/domain/topic without re-ingesting (which would either duplicate or rely on similarity dedupe to overwrite). Mode "merge" (default) only updates specified fields; "replace" wipes unset fields to defaults — footgun-y, used sparingly. Rejects mutations of id, createdAt, embedding (re-embedding requires re-ingest with skipDedupe).',
     inputSchema: z.object({
@@ -331,7 +331,7 @@ server.registerTool('engram-update-metadata', {
     // immutable fields (id, createdAt, embedding) stay locked.
     const patch = buildUpdateMetadataPatch(metadata, effectiveMode);
     if (effectiveMode === 'replace') {
-        process.stderr.write(`[engram] engram-update-metadata mode=replace id=${id} — caller wiped unset metadata fields to defaults\n`);
+        process.stderr.write(`[engram] memory-update-metadata mode=replace id=${id} — caller wiped unset metadata fields to defaults\n`);
     }
     // Compute a lightweight diff for the audit line (existing vs patch),
     // limited to the keys the patch actually touches so we don't log the
@@ -341,7 +341,7 @@ server.registerTool('engram-update-metadata', {
         const before = existing[key];
         diff[key] = { from: before, to: value };
     }
-    process.stderr.write(`[engram] engram-update-metadata id=${id} mode=${effectiveMode} diff=${JSON.stringify(diff)}\n`);
+    process.stderr.write(`[engram] memory-update-metadata id=${id} mode=${effectiveMode} diff=${JSON.stringify(diff)}\n`);
     await storage.updateChunk(id, patch);
     const updated = await storage.getChunk(id);
     if (!updated) {
@@ -362,7 +362,7 @@ server.registerTool('engram-update-metadata', {
         },
     });
 });
-server.registerTool('engram-scratch-promote', {
+server.registerTool('memory-scratch-promote', {
     title: 'Promote Scratch Memory',
     description: 'Graduate a scratch-tier memory to short-term so it survives the 24h auto-purge and enters the normal consolidation lifecycle. Use after deciding an exploratory note is worth keeping.',
     inputSchema: z.object({
@@ -379,7 +379,7 @@ server.registerTool('engram-scratch-promote', {
     await storage.updateChunk(id, { tier: 'short-term' });
     return json({ promoted: true, id, from: 'scratch', to: 'short-term' });
 });
-server.registerTool('engram-extract', {
+server.registerTool('memory-extract', {
     title: 'Extract Memories',
     description: 'Extract memories from a conversation. Uses LLM or heuristic fallback. Set rulesOnly=true to extract procedural rules only.',
     inputSchema: z.object({
@@ -414,7 +414,7 @@ server.registerTool('engram-extract', {
         });
     }
     const convId = conversationId ?? `mcp-${Date.now()}`;
-    // Rules-only mode (replaces old engram-extract-rules tool)
+    // Rules-only mode (replaces old memory-extract-rules tool)
     if (rulesOnly) {
         await extractRules(config, storage, parsed);
         const rules = await formatRulesForPrompt(storage);
@@ -438,7 +438,7 @@ server.registerTool('engram-extract', {
     }
     return json({ extracted: allChunks.length, memories: allChunks });
 });
-server.registerTool('engram-maintain', {
+server.registerTool('memory-maintain', {
     title: 'Consolidate',
     description: 'Run memory consolidation: decay, promote/demote tiers, link related, merge duplicates, self-organize, and sync Persona bridge.',
     inputSchema: z.object({}),
@@ -455,7 +455,7 @@ server.registerTool('engram-maintain', {
     }
     return json({ action: 'consolidation', ...stats, bridge: bridgeSync });
 });
-server.registerTool('engram-rules', {
+server.registerTool('memory-rules', {
     title: 'Procedural Rules',
     description: 'Show active procedural rules learned from corrections and preferences.',
     inputSchema: z.object({}),
@@ -464,7 +464,7 @@ server.registerTool('engram-rules', {
     const t = await formatRulesForPrompt(storage);
     return text(t || 'No active procedural rules.');
 });
-server.registerTool('engram-outcome', {
+server.registerTool('memory-outcome', {
     title: 'Recall Outcome',
     description: 'Record whether recalled memories were helpful, corrected, or irrelevant. Adjusts importance.',
     inputSchema: z.object({
@@ -477,7 +477,7 @@ server.registerTool('engram-outcome', {
     await recordRecallOutcome(config, storage, ids, outcome, `mcp-${Date.now()}`);
     return text(`Recorded ${outcome} outcome for ${ids.length} chunk(s).`);
 });
-server.registerTool('engram-session', {
+server.registerTool('memory-session', {
     title: 'Session State',
     description: 'Manage session state (hot RAM). Actions: show, task, context, decision, action, clear.',
     inputSchema: z.object({
@@ -507,7 +507,7 @@ server.registerTool('engram-session', {
             return text(`Unknown action: ${action}`);
     }
 });
-server.registerTool('engram-stats', {
+server.registerTool('memory-stats', {
     title: 'Stats',
     description: 'Memory system stats: chunks by tier/layer/type, rules, knowledge graph, bridge status, and taxonomy.',
     inputSchema: z.object({}),
@@ -556,7 +556,7 @@ server.registerTool('engram-stats', {
         sessionTask: state.currentTask || null,
     });
 });
-server.registerTool('engram-govern', {
+server.registerTool('memory-govern', {
     title: 'Governance Check',
     description: 'Advisory checks: "check" (contradictions), "drift" (semantic drift), "poison" (injection scan), "full" (all).',
     inputSchema: z.object({
@@ -591,7 +591,7 @@ server.registerTool('engram-govern', {
 // ─────────────────────────────────────────────────────────────────────
 // KNOWLEDGE GRAPH TOOLS
 // ─────────────────────────────────────────────────────────────────────
-server.registerTool('engram-kg-add', {
+server.registerTool('memory-kg-add', {
     title: 'KG Add',
     description: 'Add a subject-predicate-object triple. Use replace=true to auto-invalidate conflicting facts.',
     inputSchema: z.object({
@@ -607,7 +607,7 @@ server.registerTool('engram-kg-add', {
     const triple = await fn(storage, subject, predicate, object, `mcp-${Date.now()}`, confidence);
     return json({ added: true, triple: { id: triple.id, subject: triple.subject, predicate: triple.predicate, object: triple.object } });
 });
-server.registerTool('engram-kg-query', {
+server.registerTool('memory-kg-query', {
     title: 'KG Query',
     description: 'Query knowledge graph triples. Filter by subject, predicate, and/or object.',
     inputSchema: z.object({
@@ -630,7 +630,7 @@ server.registerTool('engram-kg-query', {
         })),
     });
 });
-server.registerTool('engram-kg-invalidate', {
+server.registerTool('memory-kg-invalidate', {
     title: 'KG Invalidate',
     description: 'Mark a fact as no longer valid. Stays in history.',
     inputSchema: z.object({
@@ -641,7 +641,7 @@ server.registerTool('engram-kg-invalidate', {
     await invalidateTriple(storage, tripleId);
     return text(`Triple ${tripleId} invalidated.`);
 });
-server.registerTool('engram-kg-timeline', {
+server.registerTool('memory-kg-timeline', {
     title: 'KG Timeline',
     description: 'Chronological history of all facts about an entity.',
     inputSchema: z.object({
@@ -658,13 +658,13 @@ server.registerTool('engram-kg-timeline', {
         })),
     });
 });
-server.registerTool('engram-dossier', {
+server.registerTool('memory-dossier', {
     title: 'Entity Dossier',
     description: [
-        'Aggregate everything Engram knows about an entity (person, project, concept) into a structured snapshot.',
+        'Aggregate everything przm Memory knows about an entity (person, project, concept) into a structured snapshot.',
         'Pulls from FOUR sources: (1) KG triples where the entity is subject — definitive facts about the entity; (2) KG triples where the entity is object — facts where others reference the entity (e.g. "Alice reports-to Matt" appears in Matt\'s dossier as referencedBy); (3) memory chunks mentioning the entity in content/tags/topic — preferences, decisions, context; (4) recent activity ordered by createdAt — what came up lately.',
         'Output is grouped by category (facts, preferences, decisions, corrections, recent) so the consumer doesn\'t have to bucket the chunks themselves.',
-        'Honors an optional budgetTokens cap; greedy fill within each category when set. Used by Pyre\'s Context Budget Engine to populate "what we know about <X>" slots without spending the entire memories budget on a search-by-relevance grab bag.',
+        'Honors an optional budgetTokens cap; greedy fill within each category when set. Used by przm\'s Context Budget Engine to populate "what we know about <X>" slots without spending the entire memories budget on a search-by-relevance grab bag.',
     ].join(' '),
     inputSchema: z.object({
         entity: z.string().describe('Entity name. Matches against KG subject, chunk content (substring), tags (exact), and topic (exact). Case-insensitive.'),
@@ -742,7 +742,7 @@ server.registerTool('engram-dossier', {
     // Optional token-budget enforcement. Splits budget evenly across
     // the 5 categories (facts / preferences / decisions / corrections
     // / recent) and greedy-fills each within its share. Same 4
-    // chars/token + 30 wrapper estimate as engram-budget.
+    // chars/token + 30 wrapper estimate as memory-budget.
     let usedTokens = 0;
     if (typeof budgetTokens === 'number' && budgetTokens > 0) {
         const perCategoryBudget = Math.floor(budgetTokens / 5);
@@ -801,7 +801,7 @@ server.registerTool('engram-dossier', {
 // ─────────────────────────────────────────────────────────────────────
 // DIARY TOOLS
 // ─────────────────────────────────────────────────────────────────────
-server.registerTool('engram-diary-write', {
+server.registerTool('memory-diary-write', {
     title: 'Write Diary',
     description: 'Write a session diary entry. Record what happened, what was decided, what matters next.',
     inputSchema: z.object({
@@ -812,7 +812,7 @@ server.registerTool('engram-diary-write', {
     const entry = writeDiaryEntry(config.dataDir, content, agent);
     return json({ written: true, date: entry.date, time: entry.time, agent: entry.agent });
 });
-server.registerTool('engram-diary-read', {
+server.registerTool('memory-diary-read', {
     title: 'Read Diary',
     description: 'Read diary entries from recent days or a specific date.',
     inputSchema: z.object({
@@ -827,7 +827,7 @@ server.registerTool('engram-diary-read', {
 // ─────────────────────────────────────────────────────────────────────
 // HANDOFF TOOLS — cross-session "where we left off" lifeline
 // ─────────────────────────────────────────────────────────────────────
-server.registerTool('engram-handoff-write', {
+server.registerTool('memory-handoff-write', {
     title: 'Write Handoff Note',
     description: 'Write a structured "where we left off" snapshot (a.k.a. session checkpoint). Call BEFORE /compact, before session end, when context_pressure returns hot/critical, or when the user asks to "save this session." Pass an optional `name` (e.g. "engram-named-checkpoints") so the user can later list-and-pick rather than scanning timestamps. This is the lifeline if the context window fills before compaction runs.',
     inputSchema: z.object({
@@ -864,13 +864,13 @@ server.registerTool('engram-handoff-write', {
         summary: note.currentTask,
     });
 });
-server.registerTool('engram-handoff-read', {
+server.registerTool('memory-handoff-read', {
     title: 'Read Handoff Note',
-    description: 'Read a saved handoff/checkpoint. With no arg, returns the most recent. Pass `name` to load a named checkpoint, or `stamp` to load a specific timestamp. Set `list=true` to get recent checkpoints (deprecated — prefer engram-handoff-list).',
+    description: 'Read a saved handoff/checkpoint. With no arg, returns the most recent. Pass `name` to load a named checkpoint, or `stamp` to load a specific timestamp. Set `list=true` to get recent checkpoints (deprecated — prefer memory-handoff-list).',
     inputSchema: z.object({
         name: z.string().optional().describe('Named checkpoint to load (e.g. "engram-named-checkpoints"). Takes precedence over stamp if both are provided.'),
         stamp: z.string().optional().describe('Handoff stamp to load (e.g. "2026-04-20_14-32-05"). If omitted and no name, returns the latest.'),
-        list: z.boolean().optional().describe('Deprecated — use engram-handoff-list. If true, lists recent checkpoints.'),
+        list: z.boolean().optional().describe('Deprecated — use memory-handoff-list. If true, lists recent checkpoints.'),
         limit: z.number().min(1).max(50).optional().describe('For list mode: max entries to return (default 10).'),
     }),
 }, async ({ name, stamp, list, limit }) => {
@@ -883,22 +883,22 @@ server.registerTool('engram-handoff-read', {
         return json({
             found: false,
             message: identifier
-                ? `No handoff found matching "${identifier}". Use engram-handoff-list to see saved checkpoints.`
+                ? `No handoff found matching "${identifier}". Use memory-handoff-list to see saved checkpoints.`
                 : 'No handoff note available.',
         });
     }
     return json({ found: true, ...note });
 });
-server.registerTool('engram-handoff-list', {
+server.registerTool('memory-handoff-list', {
     title: 'List Handoff Checkpoints',
-    description: 'List recent saved handoffs/checkpoints, newest first. Each entry includes stamp, timestamp, reason, currentTask snippet, and (if set) the user-facing name. Call this when the user asks to "resume" or "pick up where we left off" so you can present options before loading one with engram-handoff-read.',
+    description: 'List recent saved handoffs/checkpoints, newest first. Each entry includes stamp, timestamp, reason, currentTask snippet, and (if set) the user-facing name. Call this when the user asks to "resume" or "pick up where we left off" so you can present options before loading one with memory-handoff-read.',
     inputSchema: z.object({
         limit: z.number().min(1).max(50).optional().describe('Max checkpoints to return (default 10, max 50).'),
     }),
 }, async ({ limit }) => {
     return json({ handoffs: listHandoffs(config.dataDir, limit ?? 10) });
 });
-server.registerTool('engram-context-pressure', {
+server.registerTool('memory-context-pressure', {
     title: 'Context Pressure Check',
     description: 'Self-assess context window pressure and get an action plan. Call periodically during long sessions — especially after big tool outputs, many file reads, or when responses feel sluggish. Levels: ok, warm, hot, critical. Also call with phaseBoundary=true at natural phase boundaries (task complete, pivoting focus, finishing a subsystem) — pivots thrash the cache anyway, so that is the RIGHT moment to compact. Returns an ordered actionPlan telling you exactly what to do (save memories, write handoff, compact).',
     inputSchema: z.object({
@@ -925,21 +925,21 @@ function sleepMs(ms) {
 // headroom for the final pollDeviceCode round-trip after the loop's
 // "still pending" exit check.
 const RESUME_MAX_DURATION_MS = 45_000;
-server.registerTool('engram-login', {
+server.registerTool('memory-login', {
     title: 'Cloud Login (start device-code pairing)',
     description: [
-        'Start a device-code login against a Pyre Cloud server (the same flow as the `engram-memory login` CLI command).',
-        'Returns the URL and user code the human must visit + enter in a browser. AFTER showing those to the user, call `engram-login-resume` with the returned `deviceCode` to poll for approval — it may need to be called more than once if the user is slow.',
-        'On approval the credentials file at `~/.pyre/credentials.json` (or $PYRE_CREDENTIALS_FILE) is written and Engram\'s cloud storage adapter starts using it on next server start.',
+        'Start a device-code login against a przm Cloud server (the same flow as the `przm-memory login` CLI command).',
+        'Returns the URL and user code the human must visit + enter in a browser. AFTER showing those to the user, call `memory-login-resume` with the returned `deviceCode` to poll for approval — it may need to be called more than once if the user is slow.',
+        'On approval the credentials file at `~/.pyre/credentials.json` (or $PYRE_CREDENTIALS_FILE) is written and przm Memory\'s cloud storage adapter starts using it on next server start.',
     ].join(' '),
     inputSchema: z.object({
-        serverUrl: z.string().describe('Pyre Cloud base URL (e.g. https://pyre.sh). No trailing slash needed.'),
+        serverUrl: z.string().describe('przm Cloud base URL (e.g. https://przm.sh). No trailing slash needed.'),
         label: z.string().optional().describe('Friendly device label to attach to the issued credential. Defaults to this machine\'s hostname.'),
     }),
 }, async ({ serverUrl, label }) => {
     const apiUrl = serverUrl.trim().replace(/\/+$/, '');
     if (!apiUrl) {
-        return json({ ok: false, error: 'serverUrl is required (e.g. https://pyre.sh).' });
+        return json({ ok: false, error: 'serverUrl is required (e.g. https://przm.sh).' });
     }
     try {
         const start = await startDeviceCode(fetch, apiUrl, label?.trim() || hostname(), sleepMs);
@@ -953,25 +953,25 @@ server.registerTool('engram-login', {
             intervalSeconds: start.interval,
             expiresInSeconds: start.expires_in,
             expiresAt,
-            instructions: `Show the user this URL and code, then call engram-login-resume({ serverUrl: "${apiUrl}", deviceCode: "${start.device_code}", intervalSeconds: ${start.interval}, expiresAt: ${expiresAt} }) to poll for approval. If it returns "pending", call it again.`,
+            instructions: `Show the user this URL and code, then call memory-login-resume({ serverUrl: "${apiUrl}", deviceCode: "${start.device_code}", intervalSeconds: ${start.interval}, expiresAt: ${expiresAt} }) to poll for approval. If it returns "pending", call it again.`,
         });
     }
     catch (err) {
         return json({ ok: false, error: `Could not reach ${apiUrl}: ${err.message}` });
     }
 });
-server.registerTool('engram-login-resume', {
+server.registerTool('memory-login-resume', {
     title: 'Cloud Login (resume / poll device-code)',
     description: [
-        'Poll a device-code pairing started by `engram-login`. Polls for ~45s, then returns one of: approved, pending, denied, expired, error.',
+        'Poll a device-code pairing started by `memory-login`. Polls for ~45s, then returns one of: approved, pending, denied, expired, error.',
         'If "pending" is returned and `expiresAt` has not passed, call this tool again with the same arguments to keep waiting.',
         'On "approved" the credentials file is written and the response includes the storage api_url assigned by the server.',
     ].join(' '),
     inputSchema: z.object({
-        serverUrl: z.string().describe('Pyre Cloud base URL — must match the one passed to engram-login.'),
-        deviceCode: z.string().describe('device_code returned by engram-login.'),
-        intervalSeconds: z.number().min(1).max(60).describe('Polling interval suggested by the server (returned by engram-login).'),
-        expiresAt: z.number().describe('Epoch ms after which the device code is expired (returned by engram-login).'),
+        serverUrl: z.string().describe('przm Cloud base URL — must match the one passed to memory-login.'),
+        deviceCode: z.string().describe('device_code returned by memory-login.'),
+        intervalSeconds: z.number().min(1).max(60).describe('Polling interval suggested by the server (returned by memory-login).'),
+        expiresAt: z.number().describe('Epoch ms after which the device code is expired (returned by memory-login).'),
     }),
 }, async ({ serverUrl, deviceCode, intervalSeconds, expiresAt }) => {
     const apiUrl = serverUrl.trim().replace(/\/+$/, '');
@@ -995,7 +995,7 @@ server.registerTool('engram-login-resume', {
             return json({ ok: false, status: 'denied', error: 'Authorization denied.' });
         }
         if (body.status === 'expired') {
-            return json({ ok: false, status: 'expired', error: 'Pairing code expired. Call engram-login again.' });
+            return json({ ok: false, status: 'expired', error: 'Pairing code expired. Call memory-login again.' });
         }
         if (body.status === 'approved') {
             try {
@@ -1008,7 +1008,7 @@ server.registerTool('engram-login-resume', {
                     label: creds.label,
                     scopes: creds.scopes,
                     credentialsPath: credentialsPath(),
-                    note: 'Credentials written. Restart the Engram MCP server (or your MCP client) for cloud storage to take effect.',
+                    note: 'Credentials written. Restart the przm Memory MCP server (or your MCP client) for cloud storage to take effect.',
                 });
             }
             catch (err) {
@@ -1017,18 +1017,18 @@ server.registerTool('engram-login-resume', {
         }
     }
     if (Date.now() >= expiresAt) {
-        return json({ ok: false, status: 'expired', error: 'Pairing code expired. Call engram-login again.' });
+        return json({ ok: false, status: 'expired', error: 'Pairing code expired. Call memory-login again.' });
     }
     return json({
         ok: true,
         status: 'pending',
         secondsUntilExpiry: Math.max(0, Math.floor((expiresAt - Date.now()) / 1000)),
-        note: 'Still waiting on browser approval. Call engram-login-resume again with the same arguments.',
+        note: 'Still waiting on browser approval. Call memory-login-resume again with the same arguments.',
     });
 });
-server.registerTool('engram-login-status', {
+server.registerTool('memory-login-status', {
     title: 'Cloud Login Status',
-    description: 'Inspect the local Pyre Cloud credentials file. Returns whether the user is logged in, the api_url and label of the active credential, and the credentials file path. No network calls.',
+    description: 'Inspect the local przm Cloud credentials file. Returns whether the user is logged in, the api_url and label of the active credential, and the credentials file path. No network calls.',
     inputSchema: z.object({}),
 }, async () => {
     const path = credentialsPath();
@@ -1046,9 +1046,9 @@ server.registerTool('engram-login-status', {
         issuedAt: creds.issued_at,
     });
 });
-server.registerTool('engram-logout', {
+server.registerTool('memory-logout', {
     title: 'Cloud Logout',
-    description: 'Delete the local Pyre Cloud credentials file. Idempotent — succeeds whether or not the file existed. Engram falls back to local LanceDB on next server start.',
+    description: 'Delete the local przm Cloud credentials file. Idempotent — succeeds whether or not the file existed. przm Memory falls back to local LanceDB on next server start.',
     inputSchema: z.object({}),
 }, async () => {
     const path = credentialsPath();
@@ -1058,13 +1058,13 @@ server.registerTool('engram-logout', {
         loggedOut: removed,
         alreadyLoggedOut: !removed,
         credentialsPath: path,
-        note: removed ? 'Restart the Engram MCP server to fall back to local storage.' : undefined,
+        note: removed ? 'Restart the przm Memory MCP server to fall back to local storage.' : undefined,
     });
 });
 // ─────────────────────────────────────────────────────────────────────
 // DIAGNOSTIC RETRIEVAL TRACES
 // ─────────────────────────────────────────────────────────────────────
-server.registerTool('engram-trace-recent', {
+server.registerTool('memory-trace-recent', {
     title: 'Recent Retrieval Traces',
     description: [
         'List the most recent diagnostic retrieval traces. Each trace captures: query text, filters, per-stage candidate counts (corpus → vector above/below floor → keyword → final), result IDs, and total latency.',
@@ -1079,7 +1079,7 @@ server.registerTool('engram-trace-recent', {
         return json({
             enabled: false,
             traces: [],
-            note: 'Retrieval traces are disabled. Enable with ENGRAM_ENABLE_RETRIEVAL_TRACES=true (then restart Engram).',
+            note: 'Retrieval traces are disabled. Enable with ENGRAM_ENABLE_RETRIEVAL_TRACES=true (then restart przm Memory).',
         });
     }
     const traces = await listRecentTraces({ dataDir: config.dataDir, retentionDays: config.retrievalTraceRetentionDays }, limit ?? 25);
@@ -1093,7 +1093,7 @@ server.registerTool('engram-trace-recent', {
 // ─────────────────────────────────────────────────────────────────────
 // IMPORT
 // ─────────────────────────────────────────────────────────────────────
-server.registerTool('engram-import', {
+server.registerTool('memory-import', {
     title: 'Import',
     description: 'Bulk import from chat exports: claude-jsonl, chatgpt-json, or plain-text.',
     inputSchema: z.object({
@@ -1109,7 +1109,7 @@ server.registerTool('engram-import', {
 async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error('Engram MCP server running on stdio');
+    console.error('przm Memory MCP server running on stdio');
     console.error(`Data dir: ${config.dataDir}`);
     console.error(`LLM: ${isLlmAvailable() ? 'enabled' : 'disabled (heuristic mode)'}`);
     console.error(`Embeddings: local (${process.env.ENGRAM_EMBEDDING_MODEL ?? process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2'})`);

@@ -1,7 +1,7 @@
 /**
  * CONTEXT PRESSURE — self-nudge helper.
  *
- * Engram can't actually read the agent's token budget, but it can return a
+ * przm Memory can't actually read the agent's token budget, but it can return a
  * structured checklist that reminds the agent *what* to do when context is
  * getting heavy. The agent calls this periodically (or after big tool outputs)
  * and gets back a deterministic prompt-injection telling it to write a

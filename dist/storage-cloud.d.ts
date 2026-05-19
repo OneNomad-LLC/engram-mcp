@@ -1,15 +1,15 @@
 /**
- * CloudStorageAdapter — Pyre Cloud HTTP-backed storage.
+ * CloudStorageAdapter — przm Cloud HTTP-backed storage.
  *
- * Speaks the wire contract pyre-web exposes at /api/engram/*. Each
- * StorageAdapter method maps to a single HTTP request — pyre-web is
+ * Speaks the wire contract przm server exposes at /api/engram/*. Each
+ * StorageAdapter method maps to a single HTTP request — przm server is
  * a thin multi-tenant Postgres-over-HTTP shim that mirrors what
  * PostgresStorageAdapter does locally.
  *
  * Auth: Bearer token from credentials.json. The server derives the
  * tenant_id from the api-key; the adapter never plumbs it.
  *
- * Error envelope: pyre-web emits `{ "error": { "code", "message" } }`
+ * Error envelope: przm server emits `{ "error": { "code", "message" } }`
  * on non-2xx. errorBody() unpacks it; failures bubble up as Error
  * with that text so the rest of the engram pipeline reports cleanly.
  */

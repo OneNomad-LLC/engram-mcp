@@ -4,15 +4,15 @@
  * Agents in long sessions repeatedly re-read stable files, re-poll
  * unchanged endpoints, and re-list the same directories. Each re-ingest
  * goes through the full chunk → embed → save pipeline even though the
- * content hasn't moved. On CPU embeddings (Engram's default backend),
+ * content hasn't moved. On CPU embeddings (the default backend),
  * a 20K-token re-read can cost 5–15 seconds; multiplied across a
  * 50-step agent run that's significant wall-clock burn.
  *
  * The existing 0.75-similarity dedup (in `server.ts`'s engram-ingest
  * tool handler) catches semantic duplicates, but does so against the
  * ENTIRE memory store — and at write-time it actually trips on
- * incidentally-similar memories (a fact about Pyre at 0.78 similarity
- * to a fact about Engram). It also requires the new content to be
+ * incidentally-similar memories (a fact about przm at 0.78 similarity
+ * to a fact about przm Memory). It also requires the new content to be
  * embedded first, so it doesn't save the embedding cost.
  *
  * This module is the cheaper, more conservative path:
@@ -29,7 +29,7 @@
  * map lookup.
  *
  * Process-scoped intentionally: the persistence layer doesn't need
- * to know about this. Engram restart resets the cache — first ingest
+ * to know about this. przm Memory restart resets the cache — first ingest
  * after restart goes through the full pipeline, which is fine.
  */
 
@@ -157,7 +157,7 @@ export class SourceDedupCache {
 }
 
 /**
- * Module-level singleton. Engram is process-singleton anyway (one
+ * Module-level singleton. przm Memory is process-singleton anyway (one
  * server instance per data dir), so a single cache covers the whole
  * lifetime. Tests construct fresh `SourceDedupCache` instances; prod
  * uses this default.

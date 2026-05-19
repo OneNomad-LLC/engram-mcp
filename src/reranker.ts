@@ -29,9 +29,9 @@ async function getReranker(): Promise<any> {
       const { pipeline } = await import('@huggingface/transformers');
       const modelName = process.env.ENGRAM_RERANK_MODEL ?? process.env.SMART_MEMORY_RERANK_MODEL ?? 'Xenova/ms-marco-MiniLM-L-6-v2';
       const device = process.env.ENGRAM_DEVICE ?? process.env.SMART_MEMORY_DEVICE ?? 'cpu';
-      console.error(`Engram: loading reranker model ${modelName} (device: ${device})...`);
+      console.error(`przm-memory: loading reranker model ${modelName} (device: ${device})...`);
       _reranker = await pipeline('text-classification', modelName, { device } as any);
-      console.error('Engram: reranker model ready');
+      console.error('przm-memory: reranker model ready');
       return _reranker;
     })();
   }

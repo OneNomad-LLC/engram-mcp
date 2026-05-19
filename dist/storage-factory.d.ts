@@ -6,7 +6,7 @@
  *   1. If `STORAGE_BACKEND` is set explicitly, that wins.
  *      - `file`     → LanceDB + filesystem under dataDir.
  *      - `postgres` → pgvector + jsonb. Requires DATABASE_URL and TENANT_ID.
- *      - `cloud`    → Pyre Cloud HTTP. Requires PYRE_API_URL + PYRE_API_KEY
+ *      - `cloud`    → przm Cloud HTTP. Requires PYRE_API_URL + PYRE_API_KEY
  *                     (or a populated ~/.pyre/credentials.json). The HTTP
  *                     adapter is a stub today — see src/storage-cloud.ts.
  *      Missing accompanying env vars fail fast with a clear error.
@@ -14,7 +14,7 @@
  *   2. Otherwise, if `~/.pyre/credentials.json` exists and parses cleanly,
  *      route through the cloud backend using those credentials. Individual
  *      PYRE_API_URL / PYRE_API_KEY env vars override the matching fields
- *      from the file. This is what `engram-mcp login` wires up.
+ *      from the file. This is what `przm-memory-mcp login` wires up.
  *
  *   3. Otherwise, `file` mode — today's default. Zero env-var change for
  *      users who never run `login`.
@@ -32,9 +32,9 @@ export interface CreateStorageOptions {
     tenantId?: string;
     /** Override embedding dimension. Defaults to ENGRAM_EMBEDDING_DIM or 384. */
     embeddingDim?: number;
-    /** Override the Pyre Cloud API base URL (cloud mode). */
+    /** Override the przm Cloud API base URL (cloud mode). */
     apiUrl?: string;
-    /** Override the Pyre Cloud API key (cloud mode). */
+    /** Override the przm Cloud API key (cloud mode). */
     apiKey?: string;
 }
 /**

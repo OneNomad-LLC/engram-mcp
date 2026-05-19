@@ -351,37 +351,37 @@ Then point your MCP client at `dist/server.js`:
 | `ENGRAM_EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | HuggingFace model for embeddings |
 | `ENGRAM_DEVICE` | `cpu` | Embedding device: `cpu`, `dml` (DirectML), or `cuda` |
 | `ENGRAM_MODEL` | `anthropic/claude-haiku-4.5` | OpenRouter model ID for LLM features. Only used when `OPENROUTER_API_KEY` is set. Any model on [openrouter.ai](https://openrouter.ai) works. |
-| `STORAGE_BACKEND` | `file` | Storage backend: `file` (LanceDB + filesystem, default), `postgres` (self-hosted multi-tenant), or `cloud` (Pyre Cloud Pro). See below. |
+| `STORAGE_BACKEND` | `file` | Storage backend: `file` (LanceDB + filesystem, default), `postgres` (self-hosted multi-tenant), or `cloud` (przm Cloud Pro). See below. |
 | `DATABASE_URL` | (none) | Postgres connection string. Required when `STORAGE_BACKEND=postgres`. |
 | `TENANT_ID` | (none) | Tenant identifier — every row in postgres is scoped by this. Required when `STORAGE_BACKEND=postgres`. |
-| `PYRE_API_URL` | (none) | pyre-web server URL for `przm-memory login`. Alternative to the positional arg or `--server` flag — one of the three is required. |
-| `PYRE_API_KEY` | (none) | Pyre Cloud API key. Overrides the field from `~/.pyre/credentials.json` when set. |
+| `PYRE_API_URL` | (none) | przm server URL for `przm-memory login`. Alternative to the positional arg or `--server` flag — one of the three is required. |
+| `PYRE_API_KEY` | (none) | przm Cloud API key. Overrides the field from `~/.pyre/credentials.json` when set. |
 | `PYRE_CREDENTIALS_FILE` | `~/.pyre/credentials.json` | Override the credentials-file path (CI / headless installs). |
 
-### Hosted (Pyre Cloud)
+### Hosted (przm Cloud)
 
-For Pyre Cloud Pro users:
+For przm Cloud Pro users:
 
 ```bash
 npm install -g @onenomad/przm-memory
-przm-memory login https://pyre.sh
+przm-memory login https://przm.sh
 ```
 
-`login` requires the pyre-web server URL. The binary ships with no hardcoded default — you point at whichever Pyre instance you're using (prod, staging, your own deployment). Three equivalent ways to supply it:
+`login` requires the przm server URL. The binary ships with no hardcoded default — you point at whichever przm instance you're using (prod, staging, your own deployment). Three equivalent ways to supply it:
 
 ```bash
-przm-memory login https://pyre.sh          # positional argument
-przm-memory login --server https://pyre.sh # flag
-PYRE_API_URL=https://pyre.sh przm-memory login   # env var
+przm-memory login https://przm.sh          # positional argument
+przm-memory login --server https://przm.sh # flag
+PYRE_API_URL=https://przm.sh przm-memory login   # env var
 ```
 
 `login` opens that URL in your browser, shows you a one-time pairing code, and waits for you to approve the device. On approval it writes `~/.pyre/credentials.json` (mode 0600) using the canonical `api_url` from the server's response — which may differ from the login URL you typed if the server normalises or redirects. From that point on przm Memory automatically routes through your cloud instance. Local data stays local; nothing changes for users who don't run `login`.
 
 ```
-$ przm-memory login https://pyre.sh
+$ przm-memory login https://przm.sh
 Open this URL in your browser to authorize:
 
-  https://pyre.sh/connect
+  https://przm.sh/connect
 
 Enter this code when prompted: PYRE-7K4M-9N2X
 (waiting for approval — Ctrl+C to cancel)
@@ -406,7 +406,7 @@ There's no terminal to open a browser from in CI. Skip `login` and set the env v
 
 ```bash
 export STORAGE_BACKEND=cloud
-export PYRE_API_URL=https://pyre.sh
+export PYRE_API_URL=https://przm.sh
 export PYRE_API_KEY=sk_pyre_xxx
 ```
 
@@ -450,7 +450,7 @@ For shared/cloud deployments where many users share one process, it also speaks 
 - pgvector required (`CREATE EXTENSION vector;`). The migration runs this for you when your DB role has the privileges; otherwise create it manually first.
 - Embedding dimension is 384 by default (matches the local `Xenova/all-MiniLM-L6-v2` model). If you change `ENGRAM_EMBEDDING_MODEL` to one with a different dimensionality, edit `migrations/postgres/001_init.sql` before running migrations.
 - Local file mode and postgres mode are **not** wire-compatible — there's no auto-import. If you're migrating an existing local install to the cloud, re-ingest is the path. Diary and handoffs in particular store different on-disk formats (markdown files vs. jsonb rows).
-- Single user, single machine: stay on `file`. The postgres path exists for the hosted Pyre deployment and similar shared infra.
+- Single user, single machine: stay on `file`. The postgres path exists for the hosted przm deployment and similar shared infra.
 
 ## Tools
 
@@ -628,7 +628,7 @@ A note on the methodology fixes that landed alongside this verification:
 
 - **`recallAtK` no longer auto-passes questions with empty `answer_session_ids`.** Previously, such questions counted as a hit (inflating R@5 by ~3pp on LongMemEval); they're now excluded from the denominator. The verified 96.0% R@5 reflects this correction.
 - **The benchmark ingest path now applies `buildContextPrefix()` at ingest** to match the query-side prefix in `src/search.ts`. Without symmetric prefixes, embedding spaces drift apart and recall collapses to chance (~12% R@5 in a pre-fix run); fixing this restored honest measurement.
-- **The benchmark forces `STORAGE_BACKEND=file`** at module load. Without it, `Storage(dataDir)` silently auto-routes to Pyre Cloud when a credentials file exists, mixing the bench's chunks with cloud-tenant data and destroying isolation. The bench now runs purely local.
+- **The benchmark forces `STORAGE_BACKEND=file`** at module load. Without it, `Storage(dataDir)` silently auto-routes to przm Cloud when a credentials file exists, mixing the bench's chunks with cloud-tenant data and destroying isolation. The bench now runs purely local.
 
 ### LoCoMo
 
@@ -740,7 +740,7 @@ When both servers are running, they coordinate through three mechanisms:
 
 2. **Cognitive-load-gated search.** When Voice detects cognitive overload, Memory's `engram-search` receives the load signal and returns only the top 3 high-importance memories instead of the full result set. Less noise when you're already overwhelmed.
 
-3. **Procedural bridge.** Memory's learned rules (from corrections and instructions) and Voice's applied evolution proposals sync through a shared bridge file at `~/.claude/procedural-bridge.json`. Memory rules become Voice proposals. Voice's applied proposals reinforce or create Memory rules. The bridge auto-syncs during `persona_consolidate`.
+3. **Procedural bridge.** Memory's learned rules (from corrections and instructions) and Voice's applied evolution proposals sync through a shared bridge file at `~/.claude/procedural-bridge.json`. Voice's applied proposals reinforce or create Memory rules. Memory rules become Voice proposals with semantic conflict detection against existing soul files — catches antonym pairs and value contradictions, not just exact duplicates. The bridge auto-syncs during `persona_consolidate`, and bridge health is visible via `persona_stats`.
 
 You can run Memory without Voice and it works fine. But if you want an AI that actually feels like it knows you, not just what you've told it, but how you like to be talked to, run both.
 

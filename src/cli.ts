@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Engram CLI router.
+ * przm Memory CLI router.
  *
  * Usage:
- *   engram-mcp                                                 → run MCP stdio server (back-compat)
- *   engram-mcp search --query <q> [--project <p>] [--limit N]
+ *   przm-memory-mcp                                                 → run MCP stdio server (back-compat)
+ *   przm-memory-mcp search --query <q> [--project <p>] [--limit N]
  *                     [--min-relevance F] [--format json|text]
- *   engram-mcp query  [--project <p>] [--tier <t>]
+ *   przm-memory-mcp query  [--project <p>] [--tier <t>]
  *                     [--min-importance F] [--limit N] [--format json|text]
- *   engram-mcp help
+ *   przm-memory-mcp help
  *
  * The CLI is additive — it wraps the same search/storage primitives the
  * MCP server uses so hook scripts can pull memories without speaking
@@ -23,15 +23,15 @@ import { search, formatRecalledMemories } from './search.js';
 import type { MemoryTier, SearchResult } from './types.js';
 import type { StoredChunk } from './storage.js';
 
-const HELP = `engram-mcp — memory CLI
+const HELP = `przm-memory-mcp — memory CLI
 
 Usage:
-  engram-mcp                                              run MCP stdio server
-  engram-mcp search  --query <q> [opts]                   hybrid search
-  engram-mcp query   [opts]                               filter listing
-  engram-mcp login   <server-url> | --server <url>        pair with Pyre Cloud
-  engram-mcp logout                                       remove cached credentials
-  engram-mcp help                                         this message
+  przm-memory-mcp                                              run MCP stdio server
+  przm-memory-mcp search  --query <q> [opts]                   hybrid search
+  przm-memory-mcp query   [opts]                               filter listing
+  przm-memory-mcp login   <server-url> | --server <url>        pair with przm Cloud
+  przm-memory-mcp logout                                       remove cached credentials
+  przm-memory-mcp help                                         this message
 
 search options:
   --query <q>            (required) natural-language query
@@ -55,13 +55,13 @@ query options:
   --format json|text     output mode (default json)
 
 login options:
-  <server-url>           (required) pyre-web server URL, e.g. https://pyre.sh
+  <server-url>           (required) przm server URL, e.g. https://przm.sh
   --server <url>         alternative to the positional arg
                          (PYRE_API_URL env var also works)
 
 Environment:
   ENGRAM_DATA_DIR        data directory (default ~/.claude/engram)
-  PYRE_API_URL           pyre-web server URL (login subcommand; alternative
+  PYRE_API_URL           przm server server URL (login subcommand; alternative
                          to positional arg / --server flag)
   PYRE_CREDENTIALS_FILE  override ~/.pyre/credentials.json location
 `;
@@ -128,7 +128,7 @@ function parseTier(v: string | undefined): MemoryTier | undefined {
 }
 
 function fail(msg: string): never {
-  process.stderr.write(`engram-mcp: ${msg}\n`);
+  process.stderr.write(`przm-memory-mcp: ${msg}\n`);
   process.exit(2);
 }
 
@@ -240,11 +240,11 @@ async function runQuery(argv: string[]): Promise<void> {
 
 async function runLoginCmd(argv: string[]): Promise<void> {
   // Server URL is required.  Accept three sources, in precedence:
-  //   1. Positional arg: engram-mcp login https://...
-  //   2. --server flag:  engram-mcp login --server https://...
+  //   1. Positional arg: przm-memory-mcp login https://...
+  //   2. --server flag:  przm-memory-mcp login --server https://...
   //   3. PYRE_API_URL env var.
   // If none supplied -- exit 1 with the spec'd message. No defaults
-  // are baked in; this binary works against any pyre-web instance the
+  // are baked in; this binary works against any przm server instance the
   // user points at.
   const { values, positionals } = parseArgs({ args: argv, options: LOGIN_OPTS, allowPositionals: true });
   const { resolveServerUrl, runLogin } = await import('./auth/login.js');
@@ -293,12 +293,12 @@ async function main(): Promise<void> {
       await runLogoutCmd(rest);
       return;
     default:
-      process.stderr.write(`engram-mcp: unknown subcommand "${sub}"\n\n${HELP}`);
+      process.stderr.write(`przm-memory-mcp: unknown subcommand "${sub}"\n\n${HELP}`);
       process.exit(2);
   }
 }
 
 main().catch(err => {
-  process.stderr.write(`engram-mcp: ${(err as Error).stack ?? err}\n`);
+  process.stderr.write(`przm-memory-mcp: ${(err as Error).stack ?? err}\n`);
   process.exit(1);
 });

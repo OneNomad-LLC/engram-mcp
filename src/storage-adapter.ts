@@ -1,7 +1,7 @@
 /**
  * StorageAdapter — the storage contract every backend implements.
  *
- * Engram supports two backends today:
+ * przm Memory supports two backends today:
  *   - file       (default; LanceDB tables + markdown/JSON files under ENGRAM_DATA_DIR)
  *   - postgres   (multi-tenant cloud; pgvector + jsonb columns)
  *

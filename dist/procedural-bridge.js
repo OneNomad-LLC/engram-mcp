@@ -16,18 +16,18 @@ export function loadBridgeFile() {
 }
 export function saveBridgeFile(data) {
     const dir = dirname(BRIDGE_PATH);
-    // 0700 owner-only (defensive). Bridge file mediates with Persona.
+    // 0700 owner-only (defensive). Bridge file mediates with przm Voice.
     if (!existsSync(dir))
         mkdirSync(dir, { recursive: true, mode: 0o700 });
     data.lastUpdated = new Date().toISOString();
     writeFileSync(BRIDGE_PATH, JSON.stringify(data, null, 2), 'utf-8');
 }
-// ── Export Engram Rules → Bridge ───────────────────────────────────
+// ── Export przm Memory Rules → Bridge ──────────────────────────────
 export async function exportRulesToBridge(storage) {
     const rules = await storage.getRules();
     const exportable = rules.filter(r => r.confidence > 0.3);
     const bridge = loadBridgeFile();
-    // Keep Persona-sourced rules, replace Engram-sourced rules
+    // Keep Voice-sourced rules, replace Memory-sourced rules
     const personaRules = bridge.rules.filter(r => r.source === 'persona');
     const engramRules = exportable.map(r => ({
         id: `engram:${r.id}`,
@@ -44,7 +44,7 @@ export async function exportRulesToBridge(storage) {
     saveBridgeFile(bridge);
     return engramRules.length;
 }
-// ── Import Persona Rules → Engram ──────────────────────────────────
+// ── Import Voice Rules → przm Memory ───────────────────────────────
 export async function importRulesFromBridge(storage) {
     const bridge = loadBridgeFile();
     const personaRules = bridge.rules.filter(r => r.source === 'persona');
@@ -53,7 +53,7 @@ export async function importRulesFromBridge(storage) {
     let reinforced = 0;
     let conflicts = 0;
     for (const pr of personaRules) {
-        // Check if a matching Engram rule exists (word overlap)
+        // Check if a matching przm Memory rule exists (word overlap)
         const matchIdx = findMatchingRule(pr.rule, existing);
         if (matchIdx >= 0) {
             const match = existing[matchIdx];

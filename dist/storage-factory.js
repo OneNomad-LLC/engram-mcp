@@ -6,7 +6,7 @@
  *   1. If `STORAGE_BACKEND` is set explicitly, that wins.
  *      - `file`     → LanceDB + filesystem under dataDir.
  *      - `postgres` → pgvector + jsonb. Requires DATABASE_URL and TENANT_ID.
- *      - `cloud`    → Pyre Cloud HTTP. Requires PYRE_API_URL + PYRE_API_KEY
+ *      - `cloud`    → przm Cloud HTTP. Requires PYRE_API_URL + PYRE_API_KEY
  *                     (or a populated ~/.pyre/credentials.json). The HTTP
  *                     adapter is a stub today — see src/storage-cloud.ts.
  *      Missing accompanying env vars fail fast with a clear error.
@@ -14,7 +14,7 @@
  *   2. Otherwise, if `~/.pyre/credentials.json` exists and parses cleanly,
  *      route through the cloud backend using those credentials. Individual
  *      PYRE_API_URL / PYRE_API_KEY env vars override the matching fields
- *      from the file. This is what `engram-mcp login` wires up.
+ *      from the file. This is what `przm-memory-mcp login` wires up.
  *
  *   3. Otherwise, `file` mode — today's default. Zero env-var change for
  *      users who never run `login`.
@@ -83,7 +83,7 @@ export async function createStorageAdapter(opts = {}) {
     const apiKey = opts.apiKey ?? process.env.PYRE_API_KEY ?? creds?.api_key;
     if (!apiUrl || !apiKey) {
         throw new Error('STORAGE_BACKEND=cloud requires PYRE_API_URL and PYRE_API_KEY (or a valid ~/.pyre/credentials.json — ' +
-            'run `engram-mcp login`).');
+            'run `przm-memory-mcp login`).');
     }
     const { CloudStorageAdapter } = await import('./storage-cloud.js');
     return new CloudStorageAdapter({

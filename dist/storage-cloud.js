@@ -49,7 +49,7 @@ export class CloudStorageAdapter {
         const res = await this.request(method, path, body);
         if (!res.ok) {
             const msg = await errorBody(res);
-            throw new Error(`Engram cloud ${method} ${path} ${res.status}: ${msg}`);
+            throw new Error(`przm Memory cloud ${method} ${path} ${res.status}: ${msg}`);
         }
         return res;
     }
@@ -61,14 +61,14 @@ export class CloudStorageAdapter {
     async ensureReady() {
         // Lightweight identity probe. Verifies credentials are live and the
         // server is reachable before any pipeline work spins up. 401 here is
-        // a clean signal to re-run `engram-mcp login`.
+        // a clean signal to re-run `przm-memory-mcp login`.
         const res = await this.request('GET', '/api/auth/whoami');
         if (!res.ok) {
             const msg = await errorBody(res);
             if (res.status === 401) {
-                throw new Error(`Engram cloud: credentials invalid or expired (${msg}). Run \`engram-mcp login <url>\` again.`);
+                throw new Error(`przm Memory cloud: credentials invalid or expired (${msg}). Run \`przm-memory-mcp login <url>\` again.`);
             }
-            throw new Error(`Engram cloud: server check failed (${res.status}): ${msg}`);
+            throw new Error(`przm Memory cloud: server check failed (${res.status}): ${msg}`);
         }
     }
     async close() {
@@ -89,7 +89,7 @@ export class CloudStorageAdapter {
             return null;
         if (!res.ok) {
             const msg = await errorBody(res);
-            throw new Error(`Engram cloud GET /chunks/${id} ${res.status}: ${msg}`);
+            throw new Error(`przm Memory cloud GET /chunks/${id} ${res.status}: ${msg}`);
         }
         return (await res.json());
     }
@@ -206,7 +206,7 @@ export class CloudStorageAdapter {
     }
     // ── Handoffs ───────────────────────────────────────────────────────
     async writeHandoff(note) {
-        // pyre-web returns { stamp, ...HandoffNote }. The local file adapter
+        // przm server returns { stamp, ...HandoffNote }. The local file adapter
         // returns just HandoffNote, and downstream consumers don't depend on
         // `stamp` from this method's return — strip it so the contract matches.
         const full = await this.sendJson('POST', '/api/engram/handoffs', note);
@@ -221,7 +221,7 @@ export class CloudStorageAdapter {
             return null;
         if (!res.ok) {
             const msg = await errorBody(res);
-            throw new Error(`Engram cloud GET /handoffs/${target} ${res.status}: ${msg}`);
+            throw new Error(`przm Memory cloud GET /handoffs/${target} ${res.status}: ${msg}`);
         }
         return (await res.json());
     }

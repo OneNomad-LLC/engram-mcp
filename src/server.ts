@@ -80,10 +80,10 @@ function json(data: unknown) { return text(JSON.stringify(data, null, 2)); }
 // ── MCP Server ──────────────────────────────────────────────────────
 
 const server = new McpServer(
-  { name: 'engram', version: '2.4.0' },
+  { name: 'przm-memory', version: '1.0.0' },
   {
     instructions: [
-      'Engram is your long-term memory.',
+      'przm Memory is your long-term memory.',
       '',
       'Save what matters: memory-ingest for facts/preferences/decisions, memory-kg-add for relationships, memory-diary-write at session end.',
       'Before answering about prior conversations: memory-search first.',
@@ -193,7 +193,7 @@ server.registerTool(
     description: [
       'Like memory-search, but returns memories that fit within a TOKEN BUDGET instead of a count limit.',
       'Greedy fill from highest-relevance memories: candidates ranked by score × importance, included until the next entry would exceed the budget.',
-      'Used by Pyre\'s Context Budget Engine: the persona/memories slot allocates N tokens, and Engram returns "the most useful subset that fits."',
+      'Used by przm\'s Context Budget Engine: the persona/memories slot allocates N tokens, and przm Memory returns "the most useful subset that fits."',
       'Returns the same memory shape as memory-search plus { budgetTokens, usedTokens, includedCount, candidateCount } so callers can see how the budget got spent.',
     ].join(' '),
     inputSchema: z.object({
@@ -215,7 +215,7 @@ server.registerTool(
     // estimate is conservative: 4 chars/token for English-prose
     // memory content + a 30-token wrapper overhead per entry for
     // type/source/tags rendering. Slightly over-estimating beats
-    // under-estimating; the budget caller (Pyre's CBE) prefers a
+    // under-estimating; the budget caller (przm's CBE) prefers a
     // small remainder over a hard overflow.
     const ranked = candidates
       .map((r) => ({ r, weight: r.score * (r.chunk.importance + 0.1) }))
@@ -289,7 +289,7 @@ server.registerTool(
       createdAt: z.string().optional().describe('ISO 8601 timestamp override. Default: ingest time (now). Use this when ingesting memories that ORIGINALLY happened at a different time — meeting notes from yesterday, chat history from last week, dated documents from years ago. The timestamp flows into the contextual prefix embedded with the content, giving the retrieval pipeline a temporal signal it would otherwise lose. Critical for benchmarks (LoCoMo) and real workloads that backfill historical context (Cortex ingest of dated docs, importing chat history from Slack/Discord).'),
       skipKgExtraction: z.boolean().optional().describe('Skip the per-chunk knowledge-graph triple extraction. Production users should leave this off — KG extraction powers memory-dossier, memory-kg-query, and graph-aware reranking. Benchmark harnesses comparing apples-to-apples vs the standalone locomo bench (which bypasses wal.ts entirely) should set this to true so they measure the same code path.'),
       skipDailyEntry: z.boolean().optional().describe('Skip the post-batch daily-entry append. Production users should leave this off — daily entries power memory-diary-read and cross-session summaries. Benchmark harnesses set this true alongside skipKgExtraction to match the standalone bench setup.'),
-      awaitSideEffects: z.boolean().optional().describe('When false, KG extraction + daily-entry append run in the BACKGROUND after the chunks land on disk; memory-ingest returns ~5-30x faster. Default true (caller awaits everything). Right for production paths where the agent doesn\'t immediately query the just-written content (chat WAL, vault → Engram bridge). Sync mode (true) is right when the caller WILL query within the same turn — bench harnesses, test fixtures, multi-step extraction pipelines.'),
+      awaitSideEffects: z.boolean().optional().describe('When false, KG extraction + daily-entry append run in the BACKGROUND after the chunks land on disk; memory-ingest returns ~5-30x faster. Default true (caller awaits everything). Right for production paths where the agent doesn\'t immediately query the just-written content (chat WAL, vault → przm Memory bridge). Sync mode (true) is right when the caller WILL query within the same turn — bench harnesses, test fixtures, multi-step extraction pipelines.'),
     }),
   },
   async ({ content, type, importance, tags, source, domain, topic, sentiment, emotionalValence, emotionalArousal, skipDedupe, origin, tier, createdAt, skipKgExtraction, skipDailyEntry, awaitSideEffects }) => {
@@ -807,10 +807,10 @@ server.registerTool(
   {
     title: 'Entity Dossier',
     description: [
-      'Aggregate everything Engram knows about an entity (person, project, concept) into a structured snapshot.',
+      'Aggregate everything przm Memory knows about an entity (person, project, concept) into a structured snapshot.',
       'Pulls from FOUR sources: (1) KG triples where the entity is subject — definitive facts about the entity; (2) KG triples where the entity is object — facts where others reference the entity (e.g. "Alice reports-to Matt" appears in Matt\'s dossier as referencedBy); (3) memory chunks mentioning the entity in content/tags/topic — preferences, decisions, context; (4) recent activity ordered by createdAt — what came up lately.',
       'Output is grouped by category (facts, preferences, decisions, corrections, recent) so the consumer doesn\'t have to bucket the chunks themselves.',
-      'Honors an optional budgetTokens cap; greedy fill within each category when set. Used by Pyre\'s Context Budget Engine to populate "what we know about <X>" slots without spending the entire memories budget on a search-by-relevance grab bag.',
+      'Honors an optional budgetTokens cap; greedy fill within each category when set. Used by przm\'s Context Budget Engine to populate "what we know about <X>" slots without spending the entire memories budget on a search-by-relevance grab bag.',
     ].join(' '),
     inputSchema: z.object({
       entity: z.string().describe('Entity name. Matches against KG subject, chunk content (substring), tags (exact), and topic (exact). Case-insensitive.'),
@@ -1117,19 +1117,19 @@ server.registerTool(
   {
     title: 'Cloud Login (start device-code pairing)',
     description: [
-      'Start a device-code login against a Pyre Cloud server (the same flow as the `przm-memory login` CLI command).',
+      'Start a device-code login against a przm Cloud server (the same flow as the `przm-memory login` CLI command).',
       'Returns the URL and user code the human must visit + enter in a browser. AFTER showing those to the user, call `memory-login-resume` with the returned `deviceCode` to poll for approval — it may need to be called more than once if the user is slow.',
-      'On approval the credentials file at `~/.pyre/credentials.json` (or $PYRE_CREDENTIALS_FILE) is written and Engram\'s cloud storage adapter starts using it on next server start.',
+      'On approval the credentials file at `~/.pyre/credentials.json` (or $PYRE_CREDENTIALS_FILE) is written and przm Memory\'s cloud storage adapter starts using it on next server start.',
     ].join(' '),
     inputSchema: z.object({
-      serverUrl: z.string().describe('Pyre Cloud base URL (e.g. https://pyre.sh). No trailing slash needed.'),
+      serverUrl: z.string().describe('przm Cloud base URL (e.g. https://przm.sh). No trailing slash needed.'),
       label: z.string().optional().describe('Friendly device label to attach to the issued credential. Defaults to this machine\'s hostname.'),
     }),
   },
   async ({ serverUrl, label }) => {
     const apiUrl = serverUrl.trim().replace(/\/+$/, '');
     if (!apiUrl) {
-      return json({ ok: false, error: 'serverUrl is required (e.g. https://pyre.sh).' });
+      return json({ ok: false, error: 'serverUrl is required (e.g. https://przm.sh).' });
     }
     try {
       const start = await startDeviceCode(fetch, apiUrl, label?.trim() || hostname(), sleepMs);
@@ -1161,7 +1161,7 @@ server.registerTool(
       'On "approved" the credentials file is written and the response includes the storage api_url assigned by the server.',
     ].join(' '),
     inputSchema: z.object({
-      serverUrl: z.string().describe('Pyre Cloud base URL — must match the one passed to memory-login.'),
+      serverUrl: z.string().describe('przm Cloud base URL — must match the one passed to memory-login.'),
       deviceCode: z.string().describe('device_code returned by memory-login.'),
       intervalSeconds: z.number().min(1).max(60).describe('Polling interval suggested by the server (returned by memory-login).'),
       expiresAt: z.number().describe('Epoch ms after which the device code is expired (returned by memory-login).'),
@@ -1202,7 +1202,7 @@ server.registerTool(
             label: creds.label,
             scopes: creds.scopes,
             credentialsPath: credentialsPath(),
-            note: 'Credentials written. Restart the Engram MCP server (or your MCP client) for cloud storage to take effect.',
+            note: 'Credentials written. Restart the przm Memory MCP server (or your MCP client) for cloud storage to take effect.',
           });
         } catch (err) {
           return json({ ok: false, status: 'error', error: `Could not write credentials: ${(err as Error).message}` });
@@ -1226,7 +1226,7 @@ server.registerTool(
   'memory-login-status',
   {
     title: 'Cloud Login Status',
-    description: 'Inspect the local Pyre Cloud credentials file. Returns whether the user is logged in, the api_url and label of the active credential, and the credentials file path. No network calls.',
+    description: 'Inspect the local przm Cloud credentials file. Returns whether the user is logged in, the api_url and label of the active credential, and the credentials file path. No network calls.',
     inputSchema: z.object({}),
   },
   async () => {
@@ -1251,7 +1251,7 @@ server.registerTool(
   'memory-logout',
   {
     title: 'Cloud Logout',
-    description: 'Delete the local Pyre Cloud credentials file. Idempotent — succeeds whether or not the file existed. Engram falls back to local LanceDB on next server start.',
+    description: 'Delete the local przm Cloud credentials file. Idempotent — succeeds whether or not the file existed. przm Memory falls back to local LanceDB on next server start.',
     inputSchema: z.object({}),
   },
   async () => {
@@ -1262,7 +1262,7 @@ server.registerTool(
       loggedOut: removed,
       alreadyLoggedOut: !removed,
       credentialsPath: path,
-      note: removed ? 'Restart the Engram MCP server to fall back to local storage.' : undefined,
+      note: removed ? 'Restart the przm Memory MCP server to fall back to local storage.' : undefined,
     });
   }
 );
@@ -1289,7 +1289,7 @@ server.registerTool(
       return json({
         enabled: false,
         traces: [],
-        note: 'Retrieval traces are disabled. Enable with ENGRAM_ENABLE_RETRIEVAL_TRACES=true (then restart Engram).',
+        note: 'Retrieval traces are disabled. Enable with ENGRAM_ENABLE_RETRIEVAL_TRACES=true (then restart przm Memory).',
       });
     }
     const traces = await listRecentTraces(
@@ -1331,7 +1331,7 @@ server.registerTool(
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Engram MCP server running on stdio');
+  console.error('przm Memory MCP server running on stdio');
   console.error(`Data dir: ${config.dataDir}`);
   console.error(`LLM: ${isLlmAvailable() ? 'enabled' : 'disabled (heuristic mode)'}`);
   console.error(`Embeddings: local (${process.env.ENGRAM_EMBEDDING_MODEL ?? process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2'})`);

@@ -92,14 +92,14 @@ function makeProgressReporter() {
                     if (!seen.has(threshold)) {
                         seen.add(threshold);
                         const mb = p.total ? ` (${(p.total / 1_000_000).toFixed(1)}MB)` : '';
-                        console.error(`Engram: downloading ${p.file}${mb} — ${threshold}%`);
+                        console.error(`przm-memory: downloading ${p.file}${mb} — ${threshold}%`);
                     }
                 }
             }
         }
         else if (p.status === 'done' && !announced.has(p.file)) {
             // Cached-file path: progress events never fired, just a 'done'.
-            console.error(`Engram: ${p.file} (cached)`);
+            console.error(`przm-memory: ${p.file} (cached)`);
         }
     };
 }
@@ -111,12 +111,12 @@ async function getExtractor() {
             const { pipeline } = await import('@huggingface/transformers');
             const modelName = process.env.ENGRAM_EMBEDDING_MODEL ?? process.env.SMART_MEMORY_EMBEDDING_MODEL ?? 'Xenova/all-MiniLM-L6-v2';
             const device = getDevice();
-            console.error(`Engram: loading embedding model ${modelName} (device: ${device})...`);
-            console.error(`Engram: first-time setup downloads ~23MB (one-time, then cached at ~/.cache/huggingface)`);
+            console.error(`przm-memory: loading embedding model ${modelName} (device: ${device})...`);
+            console.error(`przm-memory: first-time setup downloads ~23MB (one-time, then cached at ~/.cache/huggingface)`);
             const progress_callback = makeProgressReporter();
             const loaded = await pipeline('feature-extraction', modelName, { device, progress_callback });
             _extractor = loaded;
-            console.error('Engram: embedding model ready');
+            console.error('przm-memory: embedding model ready');
             return _extractor;
         })();
     }
@@ -148,7 +148,7 @@ export async function embed(config, text, contextPrefix) {
         return full;
     }
     catch (err) {
-        console.error('Engram: embedding failed, falling back to keyword-only:', err);
+        console.error('przm-memory: embedding failed, falling back to keyword-only:', err);
         return [];
     }
 }

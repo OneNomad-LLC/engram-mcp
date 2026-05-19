@@ -1,6 +1,6 @@
 {
   "name": "@onenomad/przm-memory",
-  "version": "0.0.0-pre",
+  "version": "1.0.0",
   "mcpName": "io.github.onenomad-llc/przm-memory",
   "description": "przm Memory — local-first memory MCP server for AI agents. Part of the przm AI reliability suite. LLM-powered extraction, hybrid ANN search, tier lifecycle, spreading activation, procedural rules, real-time ingest, and session-state.",
   "type": "module",
@@ -28,9 +28,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OneNomad-LLC/engram-mcp.git"
+    "url": "git+https://github.com/OneNomad-LLC/przm-memory.git"
   },
-  "homepage": "https://github.com/OneNomad-LLC/engram-mcp",
+  "homepage": "https://github.com/OneNomad-LLC/przm-memory",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.0.0"
@@ -58,11 +58,10 @@
     "@huggingface/transformers": "^4.0.1",
     "@lancedb/lancedb": "^0.27.2",
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "mem0ai": "^2.4.5",
     "zod": "^3.24.0"
   },
   "optionalDependencies": {
-    "pg": "^8.13.0"
+    "mem0ai": "^2.4.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

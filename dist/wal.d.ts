@@ -45,7 +45,7 @@ export interface IngestEntry {
     /**
      * When true, skip the per-chunk KG triple extraction. The standalone
      * locomo bench bypasses this (calls saveChunk directly, never enters
-     * wal.ts), which is why its wall-clock is ~50× faster than Pyre's
+     * wal.ts), which is why its wall-clock is ~50× faster than przm's
      * MCP-boundary bench on the same dataset.
      *
      * Real users keep KG extraction (it powers engram-dossier,

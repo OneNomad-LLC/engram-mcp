@@ -8,11 +8,11 @@
  * are skipped.
  *
  * Usage:
- *   DATABASE_URL=postgres://... npx engram-migrate
+ *   DATABASE_URL=postgres://... npx przm-memory-migrate
  *
  * Kept deliberately tiny — no node-pg-migrate dependency, no fancy
  * features. If you need rollbacks or down-migrations, reach for a
- * real migration tool. For Engram's small fixed schema this is enough.
+ * real migration tool. For przm Memory's small fixed schema this is enough.
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';

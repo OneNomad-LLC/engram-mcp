@@ -1,5 +1,5 @@
 /**
- * Device-code login + logout against pyre-web.
+ * Device-code login + logout against przm server.
  *
  * Flow:
  *   1. POST /api/auth/device-code → user_code, device_code, verification_url, expires_in, interval.
@@ -42,7 +42,7 @@ export type DeviceCodePoll =
 
 export interface LoginOptions {
   /**
-   * pyre-web base URL. Required. Caller (the CLI) is responsible for
+   * przm server base URL. Required. Caller (the CLI) is responsible for
    * resolving this from positional arg / --server flag / PYRE_API_URL
    * env var and refusing to call runLogin() without one. runLogin
    * itself does NOT look at process.env — keeps the function
@@ -115,7 +115,7 @@ function isSafeBrowserUrl(url: string): boolean {
 
 function openInBrowser(url: string): void {
   if (!isSafeBrowserUrl(url)) {
-    process.stderr.write(`engram: refusing to open malformed URL\n`);
+    process.stderr.write(`przm-memory: refusing to open malformed URL\n`);
     return;
   }
   try {
@@ -276,7 +276,7 @@ export async function runLogin(opts: LoginOptions): Promise<number> {
       body = await pollDeviceCode(fetchImpl, apiUrl, start.device_code);
     } catch (err) {
       // Transient — log and keep polling until expires_in wins.
-      process.stderr.write(`engram: poll error (will retry): ${(err as Error).message}\n`);
+      process.stderr.write(`przm-memory: poll error (will retry): ${(err as Error).message}\n`);
       continue;
     }
 
@@ -287,14 +287,14 @@ export async function runLogin(opts: LoginOptions): Promise<number> {
         process.stderr.write(`Authorization denied.\n`);
         return 1;
       case 'expired':
-        process.stderr.write(`Pairing code expired. Run \`engram-mcp login\` again.\n`);
+        process.stderr.write(`Pairing code expired. Run \`przm-memory-mcp login\` again.\n`);
         return 1;
       case 'approved': {
         const creds = credentialsFromApproval(body);
         try {
           writeCredentials(creds, opts.credentialsFile);
         } catch (err) {
-          process.stderr.write(`engram: could not write credentials: ${(err as Error).message}\n`);
+          process.stderr.write(`przm-memory: could not write credentials: ${(err as Error).message}\n`);
           return 1;
         }
         const where = opts.credentialsFile ?? '~/.pyre/credentials.json';

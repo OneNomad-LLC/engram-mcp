@@ -1,16 +1,16 @@
 /**
- * Engram library entry point.
+ * przm Memory library entry point.
  *
- * Re-exports the pure modules that make up Engram's memory subsystem so
- * downstream Node packages (Pyre, custom CLIs, alternate MCP wrappers)
- * can consume Engram directly without spawning the MCP stdio server.
+ * Re-exports the pure modules that make up the memory subsystem so
+ * downstream Node packages (przm, custom CLIs, alternate MCP wrappers)
+ * can consume przm Memory directly without spawning the MCP stdio server.
  *
  * Importing this module is side-effect-free. It does NOT load config,
  * open LanceDB, spin up embedding providers, or register any signal
  * handlers. The MCP server lives at `./server.js`; bin entries on the
  * package boot it explicitly.
  *
- * The MCP entry (`engram-memory`) and the CLI entry (`engram-mcp`)
+ * The MCP entry (`przm-memory`) and the CLI entry (`przm-memory-mcp`)
  * continue to work unchanged for Claude Code / Claude Desktop users.
  *
  * Stability: the surface below is the public API. Internal modules

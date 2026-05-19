@@ -1,7 +1,7 @@
 /**
  * Storage — backwards-compatible shim over the pluggable StorageAdapter.
  *
- * Engram historically exposed a concrete `Storage` class that owned
+ * przm Memory historically exposed a concrete `Storage` class that owned
  * LanceDB tables directly. ~20 modules import { Storage } from here
  * and call `new Storage(dataDir)` then `await storage.ensureReady()`.
  * The shim keeps that surface intact while delegating every method to

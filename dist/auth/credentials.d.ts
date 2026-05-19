@@ -1,11 +1,11 @@
 /**
- * Credentials file for Pyre Cloud — read/write/delete.
+ * Credentials file for przm Cloud — read/write/delete.
  *
  * Stored at `~/.pyre/credentials.json` by default. Override with the
  * PYRE_CREDENTIALS_FILE env var or by passing an explicit path.
  *
  * The file is the source of truth for the cloud storage backend; if
- * present and valid the storage factory routes through Pyre Cloud
+ * present and valid the storage factory routes through przm Cloud
  * instead of local LanceDB. On parse failure or shape mismatch reads
  * return null — local file mode must keep working even if the user's
  * credentials file is corrupt.

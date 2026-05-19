@@ -7,7 +7,7 @@
  * `<dataDir>/traces/<YYYY-MM-DD>/<traceid>.json` so a future replay tool
  * can reconstruct what the retrieval pipeline saw.
  *
- * Why: per Engram architecture-patterns §5, "why didn't you find the
+ * Why: per przm Memory architecture-patterns §5, "why didn't you find the
  * obvious doc" is the most common quality complaint. Without traces,
  * every report is a bespoke debugging session. Traces also feed quality
  * metrics (floor calibration, recall@k per workspace) when enough

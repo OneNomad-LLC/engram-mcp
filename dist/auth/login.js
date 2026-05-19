@@ -1,5 +1,5 @@
 /**
- * Device-code login + logout against pyre-web.
+ * Device-code login + logout against przm server.
  *
  * Flow:
  *   1. POST /api/auth/device-code → user_code, device_code, verification_url, expires_in, interval.
@@ -77,7 +77,7 @@ function isSafeBrowserUrl(url) {
 }
 function openInBrowser(url) {
     if (!isSafeBrowserUrl(url)) {
-        process.stderr.write(`engram: refusing to open malformed URL\n`);
+        process.stderr.write(`przm-memory: refusing to open malformed URL\n`);
         return;
     }
     try {
@@ -219,7 +219,7 @@ export async function runLogin(opts) {
         }
         catch (err) {
             // Transient — log and keep polling until expires_in wins.
-            process.stderr.write(`engram: poll error (will retry): ${err.message}\n`);
+            process.stderr.write(`przm-memory: poll error (will retry): ${err.message}\n`);
             continue;
         }
         switch (body.status) {
@@ -229,7 +229,7 @@ export async function runLogin(opts) {
                 process.stderr.write(`Authorization denied.\n`);
                 return 1;
             case 'expired':
-                process.stderr.write(`Pairing code expired. Run \`engram-mcp login\` again.\n`);
+                process.stderr.write(`Pairing code expired. Run \`przm-memory-mcp login\` again.\n`);
                 return 1;
             case 'approved': {
                 const creds = credentialsFromApproval(body);
@@ -237,7 +237,7 @@ export async function runLogin(opts) {
                     writeCredentials(creds, opts.credentialsFile);
                 }
                 catch (err) {
-                    process.stderr.write(`engram: could not write credentials: ${err.message}\n`);
+                    process.stderr.write(`przm-memory: could not write credentials: ${err.message}\n`);
                     return 1;
                 }
                 const where = opts.credentialsFile ?? '~/.pyre/credentials.json';

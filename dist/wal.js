@@ -63,10 +63,10 @@ export async function ingest(config, storage, entries) {
         // Advisory poisoning check — log warning but never block
         const poisonFlag = checkContentPoisoning(trimmedContent);
         if (poisonFlag) {
-            console.error(`Engram governance: ${poisonFlag} in "${trimmedContent.slice(0, 80)}..."`);
+            console.error(`przm-memory governance: ${poisonFlag} in "${trimmedContent.slice(0, 80)}..."`);
         }
         // Same-source ingest dedup. When the agent re-reads a stable file
-        // or re-polls an unchanged endpoint within the same Engram process,
+        // or re-polls an unchanged endpoint within the same przm Memory process,
         // we've already chunked + embedded + saved this content. Look up
         // the (source, content-hash) pair in the in-memory cache and short-
         // circuit the rest of the pipeline on a hit. Reuses the prior
