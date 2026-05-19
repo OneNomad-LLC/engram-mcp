@@ -3,7 +3,7 @@
 [![przm: Memory](https://img.shields.io/badge/przm-Memory-E84040?style=flat-square&labelColor=1a1a1a)](https://przm.sh)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square&labelColor=1a1a1a)](LICENSE)
 
-The memory surface of [przm](https://przm.sh), OneNomad's AI reliability suite. Project codename: `engram`. The repo (`OneNomad-LLC/engram-mcp`) and npm package are renaming to `przm-memory` alongside the v1.0 publish; until then, install from source.
+The memory surface of [przm](https://przm.sh), OneNomad's AI reliability suite. Project codename: `engram`. The GitHub repo is now [`OneNomad-LLC/przm-memory`](https://github.com/OneNomad-LLC/przm-memory) (old URLs redirect); the npm package publishes as `@onenomad/przm-memory` at v1.0. Until then, install from source.
 
 A memory system for AI agents. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). przm Memory sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores **96.8% R@5 / 98.8% R@10 on LongMemEval** and **85.1% R@5 / 92.0% R@10 on LoCoMo**. On R@10 it beats MemPalace hybrid v5 (88.9%) by +3.1pp on LoCoMo and approaches MemPalace hybrid v4's R@5 (98.4%) on LongMemEval, at **44ms p50 search latency** on a 53-session corpus. Methodology is reproducible from a fresh clone with one command. See [`benchmarks/results/published/`](benchmarks/results/published) for committed result JSONs.
 
@@ -148,7 +148,7 @@ Every chunk carries an `origin` tag that distinguishes user-asserted memory from
 - **`imported`** — bulk-loaded via `engram-import`.
 - **`derived`** — produced by consolidation (e.g. episodic-to-semantic summaries).
 
-The split mirrors the journal pattern in [przm Voice](https://github.com/OneNomad-LLC/persona-mcp) (persona): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
+The split mirrors the journal pattern in [przm Voice](https://github.com/OneNomad-LLC/przm-voice) (persona): a clean ownership boundary between what the user said and what the system inferred. If you want auto-extracted memories to lose to your hand-written ones in a near-duplicate fight, this is what makes that happen.
 
 Importance decays exponentially over time, but the rates differ by cognitive layer:
 - **Procedural** (rules): decays slowest (0.98/week, floor 0.15). Rules tend to stay relevant.
@@ -248,10 +248,10 @@ przm Memory ships two optional Claude Code hooks: `hooks/engram_precompact_hook.
 {
   "hooks": {
     "PreCompact": [
-      { "type": "command", "command": "/absolute/path/to/engram-mcp/hooks/engram_precompact_hook.sh" }
+      { "type": "command", "command": "/absolute/path/to/przm-memory/hooks/engram_precompact_hook.sh" }
     ],
     "Stop": [
-      { "type": "command", "command": "/absolute/path/to/engram-mcp/hooks/engram_stop_hook.sh" }
+      { "type": "command", "command": "/absolute/path/to/przm-memory/hooks/engram_stop_hook.sh" }
     ]
   }
 }
@@ -277,12 +277,12 @@ If your tool can connect to an MCP server over stdio, przm Memory will work with
 
 ## Installation
 
-> **Heads up — npm publish pending.** The package is renaming from `@onenomad/engram-mcp` to `@onenomad/przm-memory` at the same time it first publishes (v1.0). Neither name is on npm yet. Until v1.0 lands, install from source (see [Source](#source) below). The `npx @onenomad/engram-mcp` commands shown in this section will work after the v1.0 publish; nothing else changes about the install steps.
+> **Heads up — `@onenomad/przm-memory` publishes at v1.0.** The package isn't on npm yet. Until v1.0 lands, install from source (see [Source](#source) below). The `npx @onenomad/przm-memory` commands shown in this section will work after the v1.0 publish; nothing else changes about the install steps.
 
 ### Claude Code
 
 ```bash
-claude mcp add engram -- npx @onenomad/engram-mcp
+claude mcp add engram -- npx @onenomad/przm-memory
 ```
 
 ### Claude Desktop
@@ -294,7 +294,7 @@ Add to your Claude Desktop config file. On macOS it's at `~/Library/Application 
   "mcpServers": {
     "engram": {
       "command": "npx",
-      "args": ["@onenomad/engram-mcp"]
+      "args": ["@onenomad/przm-memory"]
     }
   }
 }
@@ -311,7 +311,7 @@ Add to your client's MCP config:
   "mcpServers": {
     "engram": {
       "command": "npx",
-      "args": ["@onenomad/engram-mcp"]
+      "args": ["@onenomad/przm-memory"]
     }
   }
 }
@@ -320,8 +320,8 @@ Add to your client's MCP config:
 ### From Source
 
 ```bash
-git clone https://github.com/OneNomad-LLC/engram-mcp.git
-cd engram-mcp
+git clone https://github.com/OneNomad-LLC/przm-memory.git
+cd przm-memory
 npm install
 npm run build
 ```
@@ -354,7 +354,7 @@ Then point your MCP client at `dist/server.js`:
 | `STORAGE_BACKEND` | `file` | Storage backend: `file` (LanceDB + filesystem, default), `postgres` (self-hosted multi-tenant), or `cloud` (Pyre Cloud Pro). See below. |
 | `DATABASE_URL` | (none) | Postgres connection string. Required when `STORAGE_BACKEND=postgres`. |
 | `TENANT_ID` | (none) | Tenant identifier — every row in postgres is scoped by this. Required when `STORAGE_BACKEND=postgres`. |
-| `PYRE_API_URL` | (none) | pyre-web server URL for `engram-mcp login`. Alternative to the positional arg or `--server` flag — one of the three is required. |
+| `PYRE_API_URL` | (none) | pyre-web server URL for `przm-memory login`. Alternative to the positional arg or `--server` flag — one of the three is required. |
 | `PYRE_API_KEY` | (none) | Pyre Cloud API key. Overrides the field from `~/.pyre/credentials.json` when set. |
 | `PYRE_CREDENTIALS_FILE` | `~/.pyre/credentials.json` | Override the credentials-file path (CI / headless installs). |
 
@@ -363,22 +363,22 @@ Then point your MCP client at `dist/server.js`:
 For Pyre Cloud Pro users:
 
 ```bash
-npm install -g @onenomad/engram-mcp
-engram-mcp login https://pyre.sh
+npm install -g @onenomad/przm-memory
+przm-memory login https://pyre.sh
 ```
 
 `login` requires the pyre-web server URL. The binary ships with no hardcoded default — you point at whichever Pyre instance you're using (prod, staging, your own deployment). Three equivalent ways to supply it:
 
 ```bash
-engram-mcp login https://pyre.sh          # positional argument
-engram-mcp login --server https://pyre.sh # flag
-PYRE_API_URL=https://pyre.sh engram-mcp login   # env var
+przm-memory login https://pyre.sh          # positional argument
+przm-memory login --server https://pyre.sh # flag
+PYRE_API_URL=https://pyre.sh przm-memory login   # env var
 ```
 
 `login` opens that URL in your browser, shows you a one-time pairing code, and waits for you to approve the device. On approval it writes `~/.pyre/credentials.json` (mode 0600) using the canonical `api_url` from the server's response — which may differ from the login URL you typed if the server normalises or redirects. From that point on przm Memory automatically routes through your cloud instance. Local data stays local; nothing changes for users who don't run `login`.
 
 ```
-$ engram-mcp login https://pyre.sh
+$ przm-memory login https://pyre.sh
 Open this URL in your browser to authorize:
 
   https://pyre.sh/connect
@@ -391,7 +391,7 @@ Logged in. Credentials saved to ~/.pyre/credentials.json.
 To sign out:
 
 ```bash
-engram-mcp logout
+przm-memory logout
 ```
 
 This deletes `~/.pyre/credentials.json` and reverts to local file mode on the next run. Idempotent — running it when you're already logged out exits 0.
@@ -600,8 +600,8 @@ Everything lives locally:
 Clone the repo, install, fetch the public datasets, run the whole suite:
 
 ```bash
-git clone https://github.com/OneNomad-LLC/engram-mcp.git
-cd engram-mcp
+git clone https://github.com/OneNomad-LLC/przm-memory.git
+cd przm-memory
 npm install
 bash benchmarks/download-datasets.sh
 npm run bench:all
@@ -726,7 +726,7 @@ Here are some real situations where this makes a difference.
 
 ## Pairs Well With: przm Voice (persona)
 
-If przm Memory is the brain, [przm Voice](https://github.com/OneNomad-LLC/persona-mcp) (technical handle: `persona`) is the personality.
+If przm Memory is the brain, [przm Voice](https://github.com/OneNomad-LLC/przm-voice) (technical handle: `persona`) is the personality.
 
 przm Memory handles *what* the agent remembers: facts, preferences, rules, timelines. przm Voice handles *how* the agent communicates: tone, verbosity, format preferences, and communication style. They solve different problems but work best together.
 
