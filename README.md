@@ -1,12 +1,11 @@
 # przm Memory <sub>(engram)</sub>
 
 [![przm: Memory](https://img.shields.io/badge/przm-Memory-E84040?style=flat-square&labelColor=1a1a1a)](https://przm.sh)
-[![npm](https://img.shields.io/badge/npm-%40onenomad%2Fengram--mcp-cb3837?style=flat-square&labelColor=1a1a1a)](https://www.npmjs.com/package/@onenomad/engram-mcp)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square&labelColor=1a1a1a)](LICENSE)
 
-The memory surface of [przm](https://przm.sh), OneNomad's AI reliability suite. Technical handle: `engram`. npm: `@onenomad/engram-mcp`. GitHub: `OneNomad-LLC/engram-mcp`.
+The memory surface of [przm](https://przm.sh), OneNomad's AI reliability suite. Project codename: `engram`. The repo (`OneNomad-LLC/engram-mcp`) and npm package are renaming to `przm-memory` alongside the v1.0 publish; until then, install from source.
 
-A memory system for AI agents that actually works. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). przm Memory sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores **96.8% R@5 / 98.8% R@10 on LongMemEval** and **85.5% R@5 / 91.9% R@10 on LoCoMo** — on R@10 it beats MemPalace hybrid v5 (88.9%) by +3.0pp on LoCoMo and exceeds MemPalace hybrid v4's R@5 (98.4%) on LongMemEval, at **44ms p50 search latency** on a 53-session corpus. Methodology is reproducible from a fresh clone with one command. See [`benchmarks/results/published/`](benchmarks/results/published) for committed result JSONs.
+A memory system for AI agents. LLMs can't remember anything between conversations by default, and the existing solutions are either too simple (just dump everything in a vector DB) or too expensive (send your entire history to an API every time). przm Memory sits in the middle. It runs locally, doesn't need an API key for basic operation, and scores **96.8% R@5 / 98.8% R@10 on LongMemEval** and **85.1% R@5 / 92.0% R@10 on LoCoMo**. On R@10 it beats MemPalace hybrid v5 (88.9%) by +3.1pp on LoCoMo and approaches MemPalace hybrid v4's R@5 (98.4%) on LongMemEval, at **44ms p50 search latency** on a 53-session corpus. Methodology is reproducible from a fresh clone with one command. See [`benchmarks/results/published/`](benchmarks/results/published) for committed result JSONs.
 
 The core idea is that memory shouldn't just be "find similar text." When someone asks "where was I working last March?" the system needs to actually reason about time, not just pattern match on the word "March." So the search pipeline combines vector similarity, keyword matching with IDF weighting, temporal inference, a knowledge graph, and spreading activation over a memory graph. Each piece handles a different kind of recall that the others miss.
 
@@ -277,6 +276,8 @@ przm Memory is an MCP (Model Context Protocol) server. It works with any client 
 If your tool can connect to an MCP server over stdio, przm Memory will work with it.
 
 ## Installation
+
+> **Heads up — npm publish pending.** The package is renaming from `@onenomad/engram-mcp` to `@onenomad/przm-memory` at the same time it first publishes (v1.0). Neither name is on npm yet. Until v1.0 lands, install from source (see [Source](#source) below). The `npx @onenomad/engram-mcp` commands shown in this section will work after the v1.0 publish; nothing else changes about the install steps.
 
 ### Claude Code
 
